@@ -3,15 +3,15 @@
 A c++ client library supports redis cluster, inspired by [redis-rb-cluster].
 Based on hiredis for redis implement, and redis3m for handling connection pool.
 
-[redis-rb-cluster https://github.com/antirez/redis-rb-cluster]
+[redis-rb-cluster]: https://github.com/antirez/redis-rb-cluster
 
 # Current support
 
 Multi-keys commands are not supported yet.
 Currently supported commands as followed.
-GET
-SET
-HGET
-HSET
+* GET
+* SET
+* HGET
+* HSET
 
 # Example
