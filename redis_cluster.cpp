@@ -1,9 +1,9 @@
 #include <stdlib.h>
+#include <iostream>
+#include <string>
+#include <hiredis/hiredis.h>
 #include "redis_cluster.hpp"
-
-/*static bool node_info_equal(RedisCluster::NodeInfoRef l, RedisCluster::NodeInfoRef r) {
-    return (l.host==r.host && l.port==r.port);
-}*/
+#include "deps/crc16.c"
 
 RedisCluster::RedisCluster() {
 }
@@ -11,7 +11,7 @@ RedisCluster::RedisCluster() {
 RedisCluster::~RedisCluster() {
 }
 
-int RedisCluster::init(const char *startup) {
+int RedisCluster::setup(const char *startup) {
 
     if( parse_startup(startup)<0 ) {
         return -1;
@@ -24,6 +24,72 @@ int RedisCluster::init(const char *startup) {
     }
 
     return 0;
+}
+
+int RedisCluster::get(const std::string &key, std::string &value) {
+    redisContext *c = NULL;
+    redisReply *reply = NULL;
+    std::vector<const char *> argv;
+    std::vector<size_t> argvlen;
+    uint16_t hashing = get_key_hash(key);
+    NodeInfoPtr pnode = &(slots_[ hashing % HASH_SLOTS ]);
+    
+    argv.push_back(key.c_str());
+    argv.push_back(value.c_str());
+    argvlen.push_back(strlen("GET"));
+    argvlen.push_back(value.length());
+
+    /* slot not hit
+     */
+    if( pnode->host.empty() ) {
+        return -1;
+    }
+
+    ConnectionsCIter citer = connections_.find( *pnode );
+    if( citer==connections_.end() ) {
+        c = redisConnect( pnode->host.c_str(), pnode->port );
+        if( c && c->err )  {
+            redisFree( c );
+            return -2;      
+        }
+        connections_.insert( std::make_pair(*pnode, c) );
+    }
+
+    citer = connections_.find( *pnode );
+    c = (redisContext *)citer->second;
+
+    reply = (redisReply *)redisCommandArgv(c, argv.size(), argv.data(), argvlen.data());
+    if( !reply ) {
+        redisFree( c );
+        connections_.erase( citer );
+        return -3;
+    }
+
+    if( reply->type==REDIS_REPLY_ERROR 
+        &&(!strncmp(reply->str,"MOVED",5) || !strcmp(reply->str,"ASK")) ) {
+
+        char *p = reply->str, *s; 
+        int slot;
+        /*
+         * [S] for pointer 's'
+         * [P] for pointer 'p'
+         */
+        s = strchr(p,' ');      /* MOVED[S]3999 127.0.0.1:6381 */
+        p = strchr(s+1,' ');    /* MOVED[S]3999[P]127.0.0.1:6381 */
+        *p = '\0';
+        slot = atoi(s+1);
+        s = strchr(p+1,':');    /* MOVED 3999[P]127.0.0.1[S]6381 */
+        *s = '\0';
+        slots_[slot].host = p+1;
+        slots_[slot].port = atoi(s+1);
+
+    } else if( reply->type==REDIS_REPLY_STRING ) {
+        value.assign(reply->str, reply->len);
+        return 1;
+    } else if( reply->type==REDIS_REPLY_NIL ) {
+        return 0;
+    }
+    return -1;
 }
 
 int RedisCluster::parse_startup(const char *startup) {
@@ -87,8 +153,8 @@ int RedisCluster::load_slots_cache() {
             continue;
         }
         if( reply->type==REDIS_REPLY_ARRAY ) {
-            for(size_t ii=0; i<reply->elements; ii++) {
-                subr = reply->element[i];
+            for(size_t ii=0; ii<reply->elements; ii++) {
+                subr = reply->element[ii];
                 if( subr->type!=REDIS_REPLY_ARRAY
                     || subr->elements<2
                     || subr->element[0]->type!=REDIS_REPLY_INTEGER
@@ -100,7 +166,7 @@ int RedisCluster::load_slots_cache() {
 
                 start = subr->element[0]->integer;
                 end = subr->element[1]->integer; 
-
+                
                 if( subr->elements>=3 ) {
                     innr = subr->element[2];
                     if( innr->elements<2 
@@ -124,7 +190,6 @@ int RedisCluster::load_slots_cache() {
         freeReplyObject(reply);
         break;
     }
-    
     return count;
 }
 
@@ -132,6 +197,19 @@ int RedisCluster::clear_slots_cache() {
     slots_.clear();
     slots_.resize(HASH_SLOTS);
     return 0;
+}
+uint16_t RedisCluster::get_key_hash(const std::string &key) {
+    std::string::size_type pos1, pos2;
+    std::string hashing_key = key;
+
+    pos1 = key.find("{");
+    if( pos1!=std::string::npos ) {
+        pos2 = key.find("}", pos1+1);
+        if( pos2!=std::string::npos ) {
+            hashing_key = key.substr(pos1+1, pos2-pos1-1);
+        }
+    }
+    return crc16(hashing_key.c_str(), hashing_key.length());
 }
 
 int RedisCluster::test_parse_startup(const char *startup) {
