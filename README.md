@@ -7,7 +7,7 @@ Based on hiredis for redis implement, and redis3m for handling connection pool.
 
 # Current support
 
-Multi-keys commands are not supported yet.
+Multi-keys commands are not supported yet. It'll be the future issue.
 Currently supported commands as followed.
 * GET
 * SET
@@ -15,3 +15,7 @@ Currently supported commands as followed.
 * HSET
 
 # Example
+
+# Install
+* c++ 11 is required.
+

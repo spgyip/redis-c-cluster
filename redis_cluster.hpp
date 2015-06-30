@@ -19,17 +19,34 @@
 
 #include <string>
 #include <vector>
+#include <sstream>
 #include <unordered_map>
 
-class RedisCluster {
+struct redisReply;
+
+namespace redis {
+namespace cluster {
+
+class Reply;
+class Cluster {
 public:
-    const int HASH_SLOTS = 16384;
+    const static int HASH_SLOTS = 16384;
+
+    enum ErrorE {
+        E_OK = 0, 
+        E_COMMANDS = 1,
+        E_SLOT_MISSED = 2,
+        E_IO = 3,
+        E_TTL = 4,
+        E_OTHER = 5 
+    };
 
     typedef struct NodeInfoS{
         std::string host;
         int port;
         
-        /* A comparison function for equality; 
+        /**
+         * A comparison function for equality; 
          * This is required because the hash cannot rely on the fact 
          * that the hash function will always provide a unique hash value for every distinct key 
          * (i.e., it needs to be able to deal with collisions), 
@@ -43,7 +60,8 @@ public:
         }
     }NodeInfoType, *NodeInfoPtr, &NodeInfoRef;
 
-    /*A hash function; 
+    /**
+     * A hash function; 
      * this must be a class that overrides operator() and calculates the hash value given an object of the key-type. 
      * One particularly straight-forward way of doing this is to specialize the std::hash template for your key-type.
      */
@@ -57,12 +75,10 @@ public:
     typedef ConnectionsType::iterator ConnectionsIter;
     typedef ConnectionsType::const_iterator ConnectionsCIter;
 
-    RedisCluster();
-
-    virtual ~RedisCluster();
+    Cluster();
+    virtual ~Cluster();
     
     /**
-     * @brief
      *  Setup with startup nodes.
      *  Immediately loading slots cache from startup nodes.
      *
@@ -75,22 +91,90 @@ public:
      */
     int setup(const char *startup);
 
-    int get(const std::string &key, std::string &value);
-    int set(const std::string &key, const std::string &value);
+    /**
+     * Caller should call freeReplyObject to free reply.
+     *
+     * @return 
+     *  not NULL - succ
+     *  NULL     - error
+     *             get the last error message with function err() & errstr() 
+     */
+    redisReply* run(const std::vector<std::string> &commands);
+
+    inline int err() const { return errno_; }
+    inline std::string errstr() const { return error_.str(); } 
 
 public:/* for unittest */
     int test_parse_startup(const char *startup);
     std::vector<NodeInfoType>& get_startup_nodes();
+    int test_key_hash(const std::string &key);
 
 private:
+    std::ostringstream& set_error(ErrorE e);
     int parse_startup(const char *startup);
     int load_slots_cache();
     int clear_slots_cache();
+
+    /**
+     *  Support hash tag, which means if there is a substring between {} bracket in a key, only what is inside the string is hashed.
+     *  For example {foo}key and other{foo} are in the same slot, which hashed with 'foo'.
+     */
     uint16_t get_key_hash(const std::string &key);
+
+    /**
+     *  Agent for connecting and run redisCommandArgv.
+     *  Max ttl(5 default) retries or redirects.
+     *
+     * @return 
+     *  not NULL: success, return the redisReply object. The caller should call freeReplyObject to free reply object.
+     *  NULL    : error
+     */
+    redisReply* redis_command_argv(const std::string& key, int argc, const char **argv, const size_t *argvlen);
 
     std::vector<NodeInfoType> startup_nodes_;
     ConnectionsType connections_;
     std::vector<NodeInfoType> slots_;
+
+    ErrorE errno_;
+    std::ostringstream error_;
 };
+#if 0
+class Reply {
+
+    /**
+     * Shame to steal from redis3m::reply.
+     * A copy of redisReply.
+     */
+public:
+
+    /**
+     * As same defination as hiredis/hiredis.h
+     * It's a good idea translate from hiredis's defination to local, which to avoid at risk of future change.
+     */
+    enum TypeE {
+        T_STRING = 1,
+        T_ARRAY = 2,
+        T_INTEGER = 3,
+        T_NIL = 4,
+        T_STATUS = 5,
+        T_ERROR = 6
+    };
+    
+    inline TypeE type() const { return type_; }
+    inline const std::string& str() const { return str_; }
+    inline long long integer() const { return integer_; }
+    inline const std::vector<Reply>& elements() const { return elements_; }
+
+private:
+    Reply(const redisReply *rp);
+
+    TypeE type_;
+    std::string str_;
+    long long integer_;
+    std::vector<Reply> elements_;
+};
+#endif
+}//namespace cluster
+}//namespace redis
 
 #endif

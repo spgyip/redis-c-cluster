@@ -13,7 +13,7 @@ int main(int argc, const char *argv[])
     }
     startup = argv[1];
     
-    RedisCluster *cluster = new RedisCluster();
+    redis::cluster::Cluster *cluster = new redis::cluster::Cluster();
     int rv = cluster->setup(startup.c_str());
     std::cout << rv << std::endl;
     
