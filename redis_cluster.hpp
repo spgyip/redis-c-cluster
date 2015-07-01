@@ -22,12 +22,12 @@
 #include <sstream>
 #include <unordered_map>
 
+struct redisContext;
 struct redisReply;
 
 namespace redis {
 namespace cluster {
 
-class Reply;
 class Cluster {
 public:
     const static int HASH_SLOTS = 16384;
@@ -38,7 +38,7 @@ public:
         E_SLOT_MISSED = 2,
         E_IO = 3,
         E_TTL = 4,
-        E_OTHER = 5 
+        E_OTHERS = 5 
     };
 
     typedef struct NodeInfoS{
@@ -84,12 +84,14 @@ public:
      *
      * @param 
      *  startup - '127.0.0.1:7000, 127.0.0.1:8000'
+     *  lazy    - set false, load slot cache immediately when setup.
+     *            otherwise the slot cache will be loaded when the first time running command.
      *
      * @return 
      *  0 - success
      *  <0 - fail
      */
-    int setup(const char *startup);
+    int setup(const char *startup, bool lazy);
 
     /**
      * Caller should call freeReplyObject to free reply.
@@ -102,7 +104,7 @@ public:
     redisReply* run(const std::vector<std::string> &commands);
 
     inline int err() const { return errno_; }
-    inline std::string errstr() const { return error_.str(); } 
+    inline std::string strerr() const { return error_.str(); } 
 
 public:/* for unittest */
     int test_parse_startup(const char *startup);
@@ -114,6 +116,7 @@ private:
     int parse_startup(const char *startup);
     int load_slots_cache();
     int clear_slots_cache();
+    redisContext *get_random_from_startup(NodeInfoPtr pnode);   
 
     /**
      *  Support hash tag, which means if there is a substring between {} bracket in a key, only what is inside the string is hashed.
@@ -134,6 +137,7 @@ private:
     std::vector<NodeInfoType> startup_nodes_;
     ConnectionsType connections_;
     std::vector<NodeInfoType> slots_;
+    bool load_slots_asap_;
 
     ErrorE errno_;
     std::ostringstream error_;

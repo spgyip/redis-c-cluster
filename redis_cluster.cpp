@@ -1,34 +1,39 @@
 #include <stdlib.h>
-#include <iostream>
+#include <time.h>
 #include <string.h>
+#include <iostream>
 #include <string>
 #include <hiredis/hiredis.h>
 #include "redis_cluster.hpp"
 #include "deps/crc16.c"
 
+#ifdef DEBUG
 #define DEBUGINFO(msg) std::cerr << "[DEBUG] "<< msg << std::endl;
+#else
+#define DEBUGINFO(msg)
+#endif
 
 namespace redis {
 namespace cluster {
 
 static inline std::string to_upper(const std::string& in) {
-
     std::string out;
-    out.reserve( in.length() );
+    out.reserve( in.size() );
     for(std::size_t i=0; i<in.length(); i++ ) {
-        out[i] = std::toupper( in[i] );       
+        out += char( toupper(in[i]) );       
     }
     return out;
 }
 
-Cluster::Cluster():
-        errno_(E_OK) {
+Cluster::Cluster()
+:load_slots_asap_(false), errno_(E_OK)
+{
 }
 
 Cluster::~Cluster() {
 }
 
-int Cluster::setup(const char *startup) {
+int Cluster::setup(const char *startup, bool lazy) {
 
     if( parse_startup(startup)<0 ) {
         return -1;
@@ -36,7 +41,7 @@ int Cluster::setup(const char *startup) {
 
     slots_.resize( HASH_SLOTS );
 
-    if( load_slots_cache()<0 ) {
+    if( !lazy && load_slots_cache()<0 ) {
         return -1;
     }
 
@@ -54,9 +59,9 @@ redisReply* Cluster::run(const std::vector<std::string> &commands) {
     
     std::string cmd = to_upper(commands[0]);
     if( cmd!="GET" 
-        || cmd!="SET"
-        || cmd!="HGET"
-        || cmd!="HSET" ) {
+        && cmd!="SET"
+        && cmd!="HGET"
+        && cmd!="HSET" ) {
         set_error(E_COMMANDS) << "command [" << commands[0] <<"] not support";
         return NULL;
     }
@@ -173,6 +178,7 @@ int Cluster::load_slots_cache() {
         freeReplyObject(reply);
         break;
     }
+    DEBUGINFO("load_slots_cache count " << count << " from " << np->host << ":" << np->port);
     return count;
 }
 
@@ -180,6 +186,41 @@ int Cluster::clear_slots_cache() {
     slots_.clear();
     slots_.resize(HASH_SLOTS);
     return 0;
+}
+
+redisContext *Cluster::get_random_from_startup(NodeInfoPtr pnode) {
+    if( startup_nodes_.size()==0 ) {
+        return NULL;
+    }
+
+    int s = time(NULL) % startup_nodes_.size();
+    redisContext *c = NULL;
+    for( ; s<(int)startup_nodes_.size(); s++ ) {
+
+        NodeInfoType n = startup_nodes_[s];
+        ConnectionsCIter citer = connections_.find(n);
+
+        if( citer==connections_.end() ) {
+
+            c = redisConnect(n.host.c_str(), n.port);
+            if( c && c->err )  { //try next node
+                redisFree( c );
+                continue;
+            }
+            *pnode = n;
+            connections_.insert( std::make_pair(n, c) );
+
+        } else { //connection already exists
+
+            *pnode = citer->first;
+            c = (redisContext *)citer->second;
+
+        }
+        DEBUGINFO("get random node from startup " << pnode->host << ":" << pnode->port);
+        return c;
+
+    }
+    return NULL;
 }
 
 uint16_t Cluster::get_key_hash(const std::string &key) {
@@ -198,51 +239,76 @@ uint16_t Cluster::get_key_hash(const std::string &key) {
 
 redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const char **argv, const size_t *argvlen) {
     uint16_t hashing = get_key_hash(key);
-    int ttl = 3;
+    int ttl = 5;
     NodeInfoType node;
     redisContext *c = NULL;
     redisReply *reply = NULL;
+    bool try_random_node = false;
  
     set_error(E_OK); 
+
+    if( load_slots_asap_ ) {
+        load_slots_asap_ = false;
+        load_slots_cache();
+    }
 
     int slot = hashing % HASH_SLOTS;
     while( ttl>0 ) {
         ttl--;
+        c = NULL;
 
-        node = slots_[slot];
-        if( node.host.empty() ) {
-            set_error(E_SLOT_MISSED) << "slot missed " << slot << ", key " << key;
-            break;
-        }
-
-        ConnectionsCIter citer = connections_.find( node );
-        if( citer==connections_.end() ) {
-            c = redisConnect( node.host.c_str(), node.port );
-            if( c && c->err )  {
-                redisFree( c );
-                set_error(E_IO) << "redis connect error " << node.host << ":" << node.port;
-                continue;//retry 
+        if( try_random_node ) {
+            try_random_node = false;
+            DEBUGINFO("try random node ttl " << ttl);
+            c = get_random_from_startup(&node);
+            if( !c ) {
+                set_error(E_IO) << "try random from startup fail";
+                return NULL;
             }
-            connections_.insert( std::make_pair(node, c) );
-        }
+        } else {
+            node = slots_[slot];
+            if( node.host.empty() ) { //not hit
 
-        citer = connections_.find( node );//never fail
-        c = (redisContext *)citer->second;
+                DEBUGINFO("slot not hit, try get connection from startup nodes.");
+                c = get_random_from_startup(&node);
+                if( !c ) {
+                    set_error(E_SLOT_MISSED) << "slot missed " << slot << ", key. and try get random node fail. " << key;
+                    return NULL;
+                }
+
+            } else {
+                DEBUGINFO("slot hit " << node.host << ":" << node.port);
+            }
+        }
+        
+        if( !c ) {
+            ConnectionsCIter citer = connections_.find( node );
+            if( citer==connections_.end() ) { 
+
+                c = redisConnect( node.host.c_str(), node.port );
+                if( c && c->err )  { //next ttl
+                    redisFree( c );
+                    set_error(E_IO) << "redis connect error " << node.host << ":" << node.port;
+                    try_random_node = true;//try random next ttl
+                    continue;
+                }
+                connections_.insert( std::make_pair(node, c) );
+
+            } else {//connection already exists
+
+                c = (redisContext *)citer->second;
+
+            }
+        }
         
         reply = (redisReply *)redisCommandArgv(c, argc, argv, argvlen);
-        if( !reply && (c->err==REDIS_ERR_IO || c->err==REDIS_ERR_EOF )) { //retry ttl for io error
+        if( !reply ) {//next ttl
             redisFree( c );
-            connections_.erase( citer );
+            connections_.erase( node );
             set_error(E_IO) << "redisCommandArgv error. " << c->errstr << "(" << c->err << ")";
-            continue;
-        } else if( !reply ) {
-            redisFree( c );
-            connections_.erase( citer );
-            set_error(E_OTHER) << "redisCommandArgv error. " << c->errstr << "(" << c->err << ")";
-            break;
-        }
-        else if( reply->type==REDIS_REPLY_ERROR 
-            &&(!strncmp(reply->str,"MOVED",5) || !strcmp(reply->str,"ASK")) ) {
+            try_random_node = true;//try random next ttl
+        } else if( reply->type==REDIS_REPLY_ERROR 
+            &&(!strncmp(reply->str,"MOVED",5) || !strcmp(reply->str,"ASK")) ) { //next ttl
 
             char *p = reply->str, *s; 
             /*
@@ -258,16 +324,17 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
             slots_[slot].host = p+1;
             slots_[slot].port = atoi(s+1);
 
+            load_slots_asap_ = true;
             DEBUGINFO( "redirect to [" << slot << "] " << slots_[slot].host << ", " << slots_[slot].port);
+        } else {
+            return reply;
         }
-        /* next ttl
-         */
+
+        //next ttl
     }
 
-    if( errno_==E_OK ) {
-        set_error(E_TTL) << "max redirect fail";
-    }
-    return reply;
+    set_error(E_TTL) << "max ttl fail";
+    return NULL;
 }
 
 int Cluster::test_parse_startup(const char *startup) {
