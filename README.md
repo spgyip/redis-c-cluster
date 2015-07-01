@@ -1,13 +1,14 @@
 # redis-c-cluster
 
-A c++ client library supports redis cluster, inspired by [redis-rb-cluster].
-Based on hiredis for redis implement.
+A c++ client library, based on hiredis, inspired by [redis-rb-cluster], supports redis cluster.
+The library will cache slots data locally, refresh it when change happens, and handle redirections for redis's MOVED and ASK.
 
 [redis-rb-cluster]: https://github.com/antirez/redis-rb-cluster
 
 # Current support
 
-Multi-keys commands are not supported yet. It'll be the future issue.
+Multi-keys commands are not supported yet. 
+It'll be in the future issue.
 Currently supported commands as followed.
 * GET
 * SET
@@ -37,7 +38,10 @@ if( !reply ) {
   make && make install
 * c++ 11 is required.
 * gtest is required for unittest.
-* hiredis is required for basic redis api.
+* hiredis is required for redis api.
 
 # DEBUG
-  Remove Makefile's '-DDEBUG' to avoid debug message printing to standard output.
+  Remove Makefile's '-DDEBUG' to avoid debug message, which will be printed to standard output.
+
+# Future
+* Reentrance support.
