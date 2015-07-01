@@ -1,7 +1,7 @@
 # redis-c-cluster
 
 A c++ client library supports redis cluster, inspired by [redis-rb-cluster].
-Based on hiredis for redis implement, and redis3m for handling connection pool.
+Based on hiredis for redis implement.
 
 [redis-rb-cluster]: https://github.com/antirez/redis-rb-cluster
 
@@ -15,6 +15,7 @@ Currently supported commands as followed.
 * HSET
 
 # Example
+  Lookup example/ for more examples.
 ```cpp
 if( cluster->setup("127.0.0.1:7000, 127.0.0.1:7001", true)!=0 ) {
     std::cerr << "cluster setup fail" << std::endl;
@@ -33,5 +34,10 @@ if( !reply ) {
 ```
 
 # Install
+  make && make install
 * c++ 11 is required.
+* gtest is required for unittest.
+* hiredis is required for basic redis api.
 
+# DEBUG
+  Remove Makefile's '-DDEBUG' to avoid debug message printing to standard output.
