@@ -195,10 +195,11 @@ redisContext *Cluster::get_random_from_startup(NodeInfoPtr pnode) {
 
     int s = time(NULL) % startup_nodes_.size();
     redisContext *c = NULL;
-    for( ; s<(int)startup_nodes_.size(); s++ ) {
+    for( int i=0; i<(int)startup_nodes_.size(); i++ ) {
 
-        NodeInfoType n = startup_nodes_[s];
+        NodeInfoType n = startup_nodes_[(s+i)%startup_nodes_.size()];
         ConnectionsCIter citer = connections_.find(n);
+        c = NULL;
 
         if( citer==connections_.end() ) {
 

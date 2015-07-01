@@ -27,6 +27,6 @@ int main(int argc, char *argv[])
         std::cerr << "(error)" << cluster->strerr() << ", " << cluster->err() << std::endl;
         return 1;
     }
-    std::cout << "[done]" << "set " << commands[1] << " '" << commands[2] << "' " << std::endl;
+    std::cout << "[DONE] " << "set " << commands[1] << " '" << commands[2] << "' " << std::endl;
     return 0;
 }
