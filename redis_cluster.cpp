@@ -16,6 +16,9 @@
 namespace redis {
 namespace cluster {
 
+static const char *UNSUPPORT[] = {"INFO", "SHUTDOWN","MULTI", "SLAVEOF", "CONFIG"};
+static int UNSUPPORT_NUM = sizeof(UNSUPPORT)/sizeof(char *);
+
 static inline std::string to_upper(const std::string& in) {
     std::string out;
     out.reserve( in.size() );
@@ -42,10 +45,15 @@ int Cluster::setup(const char *startup, bool lazy) {
     slots_.resize( HASH_SLOTS );
 
     if( !lazy && load_slots_cache()<0 ) {
-        return -1;
+            return -1;
+    } 
+
+    if( lazy ){
+        load_slots_asap_ = true;
     }
 
     return 0;
+
 }
 
 redisReply* Cluster::run(const std::vector<std::string> &commands) {
@@ -58,12 +66,11 @@ redisReply* Cluster::run(const std::vector<std::string> &commands) {
     }
     
     std::string cmd = to_upper(commands[0]);
-    if( cmd!="GET" 
-        && cmd!="SET"
-        && cmd!="HGET"
-        && cmd!="HSET" ) {
-        set_error(E_COMMANDS) << "command [" << commands[0] <<"] not support";
+    for( int i=0; i<UNSUPPORT_NUM; i++ ) {
+        if( cmd==UNSUPPORT[i] ) {
+        set_error(E_COMMANDS) << "command [" << commands[0] << "] not supported";
         return NULL;
+        }
     }
 
     for( size_t i=0; i<commands.size(); i++ ) {
@@ -77,6 +84,7 @@ redisReply* Cluster::run(const std::vector<std::string> &commands) {
 
 std::ostringstream& Cluster::set_error(ErrorE e) {
     errno_ = e;
+    error_.str("");
     return error_;
 }
 int Cluster::parse_startup(const char *startup) {
@@ -94,6 +102,7 @@ int Cluster::parse_startup(const char *startup) {
         }
         p3 = strchr(p1, ':');
         if( p3 ) {
+
             NodeInfoType node;
 
             *p3 = '\0';
@@ -108,6 +117,7 @@ int Cluster::parse_startup(const char *startup) {
 
             node.host = p1; //get host
             startup_nodes_.push_back(node);        
+
         }
         if( p2 )
             p1 = p2+1;
@@ -120,6 +130,8 @@ int Cluster::parse_startup(const char *startup) {
 }
 
 int Cluster::load_slots_cache() {
+    //TODO:
+    //addup more nodes to startup pool, in case of some nodes unavailable.
     
     int start, end;
     int count = 0;
@@ -128,6 +140,7 @@ int Cluster::load_slots_cache() {
     NodeInfoType node;
     NodeInfoPtr np;
     for(size_t i=0; i<startup_nodes_.size(); i++) {
+
         np = &startup_nodes_[i];
         c = redisConnect(np->host.c_str(), np->port);
         if( c && c->err ) {
@@ -141,15 +154,19 @@ int Cluster::load_slots_cache() {
             continue;
         }
         if( reply->type==REDIS_REPLY_ARRAY ) {
+
             for(size_t ii=0; ii<reply->elements; ii++) {
+
                 subr = reply->element[ii];
                 if( subr->type!=REDIS_REPLY_ARRAY
                     || subr->elements<2
                     || subr->element[0]->type!=REDIS_REPLY_INTEGER
                     || subr->element[1]->type!=REDIS_REPLY_INTEGER ) {
+
                     redisFree(c);
                     freeReplyObject(reply);
                     continue;
+
                 }
 
                 start = subr->element[0]->integer;
@@ -160,10 +177,13 @@ int Cluster::load_slots_cache() {
                     if( innr->elements<2 
                         || innr->element[0]->type!=REDIS_REPLY_STRING 
                         || innr->element[1]->type!=REDIS_REPLY_INTEGER ) {
+
                         redisFree(c);
                         freeReplyObject(reply);
                         continue;
+
                     }
+
                     NodeInfoType node;
                     node.host = innr->element[0]->str;
                     node.port = innr->element[1]->integer;
@@ -171,12 +191,16 @@ int Cluster::load_slots_cache() {
                         slots_[jj] = node;
                     }
                     count += (end-start+1);
-                }       
-            }
-        }
+                }      
+
+            }//for()
+
+        }//if(reply->type==...)
+
         redisFree(c);
         freeReplyObject(reply);
         break;
+
     }
     DEBUGINFO("load_slots_cache count " << count << " from " << np->host << ":" << np->port);
     return count;
@@ -256,17 +280,21 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
     int slot = hashing % HASH_SLOTS;
     while( ttl>0 ) {
         ttl--;
+        DEBUGINFO("ttl " << ttl);
         c = NULL;
 
         if( try_random_node ) {
+
             try_random_node = false;
-            DEBUGINFO("try random node ttl " << ttl);
+            DEBUGINFO("try random node");
             c = get_random_from_startup(&node);
             if( !c ) {
                 set_error(E_IO) << "try random from startup fail";
                 return NULL;
             }
+
         } else {
+
             node = slots_[slot];
             if( node.host.empty() ) { //not hit
 
@@ -278,11 +306,15 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
                 }
 
             } else {
-                DEBUGINFO("slot hit " << node.host << ":" << node.port);
+
+                DEBUGINFO("slot " << slot << " hit at " << node.host << ":" << node.port);
+
             }
+
         }
         
         if( !c ) {
+
             ConnectionsCIter citer = connections_.find( node );
             if( citer==connections_.end() ) { 
 
@@ -291,6 +323,7 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
                     redisFree( c );
                     set_error(E_IO) << "redis connect error " << node.host << ":" << node.port;
                     try_random_node = true;//try random next ttl
+                    DEBUGINFO("redis connect error " << node.host << ":" << node.port);
                     continue;
                 }
                 connections_.insert( std::make_pair(node, c) );
@@ -300,14 +333,18 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
                 c = (redisContext *)citer->second;
 
             }
+
         }
         
         reply = (redisReply *)redisCommandArgv(c, argc, argv, argvlen);
         if( !reply ) {//next ttl
+
             redisFree( c );
             connections_.erase( node );
             set_error(E_IO) << "redisCommandArgv error. " << c->errstr << "(" << c->err << ")";
             try_random_node = true;//try random next ttl
+            DEBUGINFO("redisCommandArgv error. " << c->errstr << "(" << c->err << ")");
+
         } else if( reply->type==REDIS_REPLY_ERROR 
             &&(!strncmp(reply->str,"MOVED",5) || !strcmp(reply->str,"ASK")) ) { //next ttl
 
@@ -325,10 +362,13 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
             slots_[slot].host = p+1;
             slots_[slot].port = atoi(s+1);
 
-            load_slots_asap_ = true;
+            load_slots_asap_ = true;//cluster nodes must have being changed, load slots cache as soon as possible.
             DEBUGINFO( "redirect to [" << slot << "] " << slots_[slot].host << ", " << slots_[slot].port);
+
         } else {
+
             return reply;
+
         }
 
         //next ttl
@@ -349,29 +389,5 @@ int Cluster::test_key_hash(const std::string &key) {
     return get_key_hash(key);
 }
 
-#if 0
-Reply::Reply(const redisReply *rp):
-type_(T_ERROR), 
-integer_(0){
-    type_ = static_cast<TypeE>(rp->type);
-    switch (type_) {
-        case T_ERROR:
-        case T_STRING:
-        case T_STATUS:
-           str_ = std::string(rp->str, rp->len);
-           break;
-        case T_INTEGER:
-           integer_ = rp->integer;
-           break;
-        case T_ARRAY:
-            for (size_t i=0; i < rp->elements; ++i) {
-                 elements_.push_back(Reply(rp->element[i]));
-            }
-            break;
-        default:
-            break;
-    }
-}
-#endif
 }//namespace cluster
 }//namespace redis

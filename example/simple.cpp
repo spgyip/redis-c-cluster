@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <iostream>
 #include <string.h>
+#include <hiredis/hiredis.h>
 #include "../redis_cluster.hpp"
 
 int main(int argc, char *argv[])
@@ -28,5 +29,6 @@ int main(int argc, char *argv[])
         return 1;
     }
     std::cout << "[DONE] " << "set " << commands[1] << " '" << commands[2] << "' " << std::endl;
+    freeReplyObject( reply );
     return 0;
 }

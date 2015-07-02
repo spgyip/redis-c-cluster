@@ -1,8 +1,11 @@
 # Targets
 unittest/unittest
 example/simple
+example/test
 test/test
 libredis_cluster.a
+
+example/test.cpp
 
 # ctags
 tags

@@ -80,12 +80,11 @@ public:
     
     /**
      *  Setup with startup nodes.
-     *  Immediately loading slots cache from startup nodes.
      *
      * @param 
      *  startup - '127.0.0.1:7000, 127.0.0.1:8000'
-     *  lazy    - set false, load slot cache immediately when setup.
-     *            otherwise the slot cache will be loaded when the first time running command.
+     *  lazy    - if set false, load slot cache immediately when setup.
+     *            otherwise the slots cache will be loaded later when first command is executed..
      *
      * @return 
      *  0 - success
@@ -126,10 +125,10 @@ private:
 
     /**
      *  Agent for connecting and run redisCommandArgv.
-     *  Max ttl(5 default) retries or redirects.
+     *  Max ttl(default 5) retries or redirects.
      *
      * @return 
-     *  not NULL: success, return the redisReply object. The caller should call freeReplyObject to free reply object.
+     *  not NULL: success, return the redisReply object. Caller should call freeReplyObject to free reply object.
      *  NULL    : error
      */
     redisReply* redis_command_argv(const std::string& key, int argc, const char **argv, const size_t *argvlen);
@@ -142,42 +141,7 @@ private:
     ErrorE errno_;
     std::ostringstream error_;
 };
-#if 0
-class Reply {
 
-    /**
-     * Shame to steal from redis3m::reply.
-     * A copy of redisReply.
-     */
-public:
-
-    /**
-     * As same defination as hiredis/hiredis.h
-     * It's a good idea translate from hiredis's defination to local, which to avoid at risk of future change.
-     */
-    enum TypeE {
-        T_STRING = 1,
-        T_ARRAY = 2,
-        T_INTEGER = 3,
-        T_NIL = 4,
-        T_STATUS = 5,
-        T_ERROR = 6
-    };
-    
-    inline TypeE type() const { return type_; }
-    inline const std::string& str() const { return str_; }
-    inline long long integer() const { return integer_; }
-    inline const std::vector<Reply>& elements() const { return elements_; }
-
-private:
-    Reply(const redisReply *rp);
-
-    TypeE type_;
-    std::string str_;
-    long long integer_;
-    std::vector<Reply> elements_;
-};
-#endif
 }//namespace cluster
 }//namespace redis
 
