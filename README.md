@@ -7,11 +7,11 @@ The library will cache slots data locally, refresh it when change happens, and h
 
 # Current support
 
-The priciple is only data read/write commands are supported in cluster mode.
+The principle is that only data read/write commands are supported in cluster mode.
 None-key commands are not supported in cluster mode, for example, INFO/SHUTDOWN.
 Multi-keys commands are not supported yes, it will be in the future issue.
 
-It's not reality to list all unsupported commands here, so just follow the priciple.
+It's not reality to list all unsupported commands here, so just follow the principle.
 Explicitly unsupported commands are as followed.
 * INFO
 * SHUTDOWN
