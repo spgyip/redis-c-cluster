@@ -16,8 +16,7 @@
 namespace redis {
 namespace cluster {
 
-static const char *UNSUPPORT[] = {"INFO", "SHUTDOWN","MULTI", "SLAVEOF", "CONFIG"};
-static int UNSUPPORT_NUM = sizeof(UNSUPPORT)/sizeof(char *);
+static const char *UNSUPPORT = "#INFO#SHUTDOWN#MULTI#SLAVEOF#CONFIG#";
 
 static inline std::string to_upper(const std::string& in) {
     std::string out;
@@ -61,17 +60,21 @@ redisReply* Cluster::run(const std::vector<std::string> &commands) {
     std::vector<size_t> argvlen;
 
     if( commands.size()<2 ) {
-        set_error(E_COMMANDS) << "commands size should at lease 2";
+        set_error(E_COMMANDS) << "none-key commands are not supported";
         return NULL;
     }
     
     std::string cmd = to_upper(commands[0]);
-    for( int i=0; i<UNSUPPORT_NUM; i++ ) {
-        if( cmd==UNSUPPORT[i] ) {
-        set_error(E_COMMANDS) << "command [" << commands[0] << "] not supported";
-        return NULL;
+
+    do{
+        std::ostringstream ss;
+        ss << "#" << cmd << "#";
+        char *p = strstr(UNSUPPORT, ss.str().c_str());
+        if( p ) {
+            set_error(E_COMMANDS) << "command [" << cmd << "] not supported";
+            return NULL;
         }
-    }
+    }while(0);
 
     for( size_t i=0; i<commands.size(); i++ ) {
         argv.push_back(commands[i].c_str());
@@ -116,8 +119,7 @@ int Cluster::parse_startup(const char *startup) {
                 *(p3--) = '\0';
 
             node.host = p1; //get host
-            startup_nodes_.push_back(node);        
-
+            startup_nodes_.push_back(node);
         }
         if( p2 )
             p1 = p2+1;

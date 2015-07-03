@@ -14,7 +14,7 @@ int main(int argc, char *argv[])
     std::cout << "cluster startup with " << startup << std::endl;
     redis::cluster::Cluster *cluster = new redis::cluster::Cluster();
 
-    if( cluster->setup("127.0.0.1:7000, 127.0.0.1:7001", true)!=0 ) {
+    if( cluster->setup(startup.c_str(), true)!=0 ) {
         std::cerr << "cluster setup fail" << std::endl;
         return 1;
     }
