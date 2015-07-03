@@ -1,11 +1,13 @@
+#include "redis_cluster.hpp"
+#include "deps/crc16.c"
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
 #include <iostream>
 #include <string>
+#include <set>
+#include <iterator>
 #include <hiredis/hiredis.h>
-#include "redis_cluster.hpp"
-#include "deps/crc16.c"
 
 #ifdef DEBUG
 #define DEBUGINFO(msg) std::cerr << "[DEBUG] "<< msg << std::endl;
@@ -119,7 +121,9 @@ int Cluster::parse_startup(const char *startup) {
                 *(p3--) = '\0';
 
             node.host = p1; //get host
-            startup_nodes_.push_back(node);
+            if( startup_nodes_.insert(node).second ) {
+                DEBUGINFO("add parse startup " << node.host << ":" << node.port);
+            }
         }
         if( p2 )
             p1 = p2+1;
@@ -132,19 +136,16 @@ int Cluster::parse_startup(const char *startup) {
 }
 
 int Cluster::load_slots_cache() {
-    //TODO:
-    //addup more nodes to startup pool, in case of some nodes unavailable.
-    
+
     int start, end;
     int count = 0;
-    redisContext *c;
     redisReply *reply, *subr, *innr;
-    NodeInfoType node;
-    NodeInfoPtr np;
-    for(size_t i=0; i<startup_nodes_.size(); i++) {
+    NodePoolType newnodes;
+    
+    NodePoolIter citer = startup_nodes_.begin();
+    for(; citer!=startup_nodes_.end(); citer++) {
 
-        np = &startup_nodes_[i];
-        c = redisConnect(np->host.c_str(), np->port);
+        redisContext *c = redisConnect(citer->host.c_str(), citer->port);
         if( c && c->err ) {
             redisFree( c );
             continue;
@@ -154,57 +155,61 @@ int Cluster::load_slots_cache() {
         if( !reply ) {
             redisFree(c);
             continue;
+        } else if( reply->type==REDIS_REPLY_ERROR ) {
+            redisFree(c);
+            freeReplyObject(reply);
+            continue;
         }
-        if( reply->type==REDIS_REPLY_ARRAY ) {
 
-            for(size_t ii=0; ii<reply->elements; ii++) {
+        for(size_t i=0; i<reply->elements; i++) {
 
-                subr = reply->element[ii];
-                if( subr->type!=REDIS_REPLY_ARRAY
-                    || subr->elements<2
-                    || subr->element[0]->type!=REDIS_REPLY_INTEGER
-                    || subr->element[1]->type!=REDIS_REPLY_INTEGER ) {
+            subr = reply->element[i];
+            if( subr->elements<3
+                || subr->element[0]->type!=REDIS_REPLY_INTEGER
+                || subr->element[1]->type!=REDIS_REPLY_INTEGER 
+                || subr->element[2]->type!=REDIS_REPLY_ARRAY )
+                continue;
 
-                    redisFree(c);
-                    freeReplyObject(reply);
-                    continue;
+            start = subr->element[0]->integer;
+            end = subr->element[1]->integer;
+            innr = subr->element[2];
 
-                }
+            if( innr->elements<2 
+                || innr->element[0]->type!=REDIS_REPLY_STRING 
+                || innr->element[1]->type!=REDIS_REPLY_INTEGER )
+                continue;
 
-                start = subr->element[0]->integer;
-                end = subr->element[1]->integer; 
-                
-                if( subr->elements>=3 ) {
-                    innr = subr->element[2];
-                    if( innr->elements<2 
-                        || innr->element[0]->type!=REDIS_REPLY_STRING 
-                        || innr->element[1]->type!=REDIS_REPLY_INTEGER ) {
+            NodeInfoType node;
+            node.host = innr->element[0]->str;
+            node.port = innr->element[1]->integer;
 
-                        redisFree(c);
-                        freeReplyObject(reply);
-                        continue;
+            for(int jj=start; jj<=end; jj++)
+                slots_[jj] = node;
+            count += (end-start+1);
 
-                    }
+            if( newnodes.insert(node).second )
+                DEBUGINFO("add startup " << node.host << ":" << node.port);
+           
 
-                    NodeInfoType node;
-                    node.host = innr->element[0]->str;
-                    node.port = innr->element[1]->integer;
-                    for(int jj=start; jj<=end; jj++) {
-                        slots_[jj] = node;
-                    }
-                    count += (end-start+1);
-                }      
-
-            }//for()
-
-        }//if(reply->type==...)
+        }//for i
 
         redisFree(c);
         freeReplyObject(reply);
         break;
 
+    }//for citer
+
+    if( citer!=startup_nodes_.end() )  {
+        DEBUGINFO("load_slots_cache count " << count << " from " << citer->host << ":" << citer->port);
     }
-    DEBUGINFO("load_slots_cache count " << count << " from " << np->host << ":" << np->port);
+    else {
+        DEBUGINFO("load_slots_cache fail from all startup node");
+    }
+
+    //append new nodes
+    for( citer=newnodes.begin(); citer!=newnodes.end(); citer++ )
+        startup_nodes_.insert( *citer );
+
     return count;
 }
 
@@ -215,32 +220,37 @@ int Cluster::clear_slots_cache() {
 }
 
 redisContext *Cluster::get_random_from_startup(NodeInfoPtr pnode) {
-    if( startup_nodes_.size()==0 ) {
+    std::size_t len = startup_nodes_.size();
+    if( len==0 )
         return NULL;
-    }
 
-    int s = time(NULL) % startup_nodes_.size();
-    redisContext *c = NULL;
-    for( int i=0; i<(int)startup_nodes_.size(); i++ ) {
+    struct timeval tp;
+    gettimeofday(&tp, NULL);
+    NodePoolCIter node_citer = startup_nodes_.begin();
+    std::advance( node_citer, tp.tv_usec % len );//random position
 
-        NodeInfoType n = startup_nodes_[(s+i)%startup_nodes_.size()];
-        ConnectionsCIter citer = connections_.find(n);
-        c = NULL;
+    for( size_t i=0; i<len; i++, node_citer++ ) {
 
-        if( citer==connections_.end() ) {
+        if( node_citer==startup_nodes_.end() ) //reset
+            node_citer = startup_nodes_.begin();
 
-            c = redisConnect(n.host.c_str(), n.port);
+        ConnectionsCIter conn_citer = connections_.find( *node_citer );
+        redisContext *c = NULL;
+
+        if( conn_citer==connections_.end() ) {
+
+            c = redisConnect(node_citer->host.c_str(), node_citer->port);
             if( c && c->err )  { //try next node
                 redisFree( c );
                 continue;
             }
-            *pnode = n;
-            connections_.insert( std::make_pair(n, c) );
+            *pnode = *node_citer;
+            connections_.insert( std::make_pair(*node_citer, c) );
 
         } else { //connection already exists
 
-            *pnode = citer->first;
-            c = (redisContext *)citer->second;
+            *pnode = conn_citer->first;
+            c = (redisContext *)conn_citer->second;
 
         }
         DEBUGINFO("get random node from startup " << pnode->host << ":" << pnode->port);
@@ -384,7 +394,7 @@ int Cluster::test_parse_startup(const char *startup) {
     return parse_startup( startup );
 }
 
-std::vector<Cluster::NodeInfoType>& Cluster::get_startup_nodes() {
+Cluster::NodePoolType& Cluster::get_startup_nodes() {
     return startup_nodes_;
 }
 int Cluster::test_key_hash(const std::string &key) {

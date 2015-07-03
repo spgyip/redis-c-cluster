@@ -1,10 +1,11 @@
+#include "../redis_cluster.hpp"
 #include <stdio.h>
-#include <stdlib.h>
-#include <iostream>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <iostream>
+#include <set>
 #include <hiredis/hiredis.h>
-#include "../redis_cluster.hpp"
 
 int main(int argc, char *argv[])
 {
@@ -31,14 +32,18 @@ int main(int argc, char *argv[])
             return 1;
         } else if( reply->type==REDIS_REPLY_ERROR ) {
             std::cerr << "(error) " << reply->str << std::endl;
-        } else {
+        } else if( reply->type==REDIS_REPLY_NIL){
+            std::cerr << "(nil)" << std::endl;
+        }
+        else {
             std::cout << "[DONE] " << reply->str << std::endl;
         }
         freeReplyObject( reply );
-        //std::cerr << "Input anything to continue." << std::endl;
-        std::cerr << std::endl;
-        sleep(1);
-        //getchar();
+        std::cerr << "Input anything to continue." << std::endl;
+        //std::cerr << std::endl;
+        //sleep(1);
+        getchar();
     }
+
     return 0;
 }

@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <set>
 #include <unordered_map>
 
 struct redisContext;
@@ -42,6 +43,7 @@ public:
     };
 
     typedef struct NodeInfoS{
+
         std::string host;
         int port;
         
@@ -57,6 +59,13 @@ public:
          */
         bool operator==(const struct NodeInfoS &other) const {
             return (host==other.host && port==other.port);
+        }
+
+        bool operator<(const struct NodeInfoS &rs) const {
+            if( host<rs.host )
+                return true;
+            else
+                return port<rs.port;
         }
     }NodeInfoType, *NodeInfoPtr, &NodeInfoRef;
 
@@ -74,6 +83,10 @@ public:
     typedef std::unordered_map<NodeInfoType, void *, KeyHasherS> ConnectionsType;//NodeInfoType=>redisContext
     typedef ConnectionsType::iterator ConnectionsIter;
     typedef ConnectionsType::const_iterator ConnectionsCIter;
+
+    typedef std::set<NodeInfoType> NodePoolType;
+    typedef NodePoolType::iterator NodePoolIter;
+    typedef NodePoolType::const_iterator NodePoolCIter;
 
     Cluster();
     virtual ~Cluster();
@@ -107,7 +120,7 @@ public:
 
 public:/* for unittest */
     int test_parse_startup(const char *startup);
-    std::vector<NodeInfoType>& get_startup_nodes();
+    NodePoolType& get_startup_nodes();
     int test_key_hash(const std::string &key);
 
 private:
@@ -133,7 +146,7 @@ private:
      */
     redisReply* redis_command_argv(const std::string& key, int argc, const char **argv, const size_t *argvlen);
 
-    std::vector<NodeInfoType> startup_nodes_;
+    NodePoolType startup_nodes_;
     ConnectionsType connections_;
     std::vector<NodeInfoType> slots_;
     bool load_slots_asap_;
