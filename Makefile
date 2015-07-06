@@ -17,7 +17,7 @@ all: $(TARGETS)
 lib: $(STATIC)
 
 $(UNITTEST): unittest/unittest.o redis_cluster.o
-	$(CXX) $^ -o $@ $(LIBS) /usr/local/lib/libgtest.a
+	$(CXX) $^ -o $@ $(LIBS) /usr/local/lib/libgtest.a -lpthread
 
 $(SIMPLE): example/simple.o redis_cluster.o
 	$(CXX) $^ -o $@ $(LIBS)
