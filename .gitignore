@@ -1,7 +1,7 @@
 # Targets
 unittest/unittest
 example/simple
-test/forever
+test/infinite
 libredis_cluster.a
 
 example/test.cpp

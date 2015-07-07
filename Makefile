@@ -2,15 +2,14 @@
 CXX=g++
 CC=cc
 AR=ar
-CXXFLAGS=-g -Wall -o2 -std=c++0x -DDEBUG
+CXXFLAGS=-g -Wall -o2 -std=c++0x #-DDEBUG
 LIBS=/usr/local/lib//libhiredis.a
 
-
 SIMPLE=example/simple
-FOREVER=test/forever
+INFINITE=test/infinite
 UNITTEST=unittest/unittest
 STATIC=libredis_cluster.a
-TARGETS=$(STATIC) $(UNITTEST) $(SIMPLE) $(FOREVER)
+TARGETS=$(STATIC) $(UNITTEST) $(SIMPLE) $(INFINITE)
 
 all: $(TARGETS) 
 
@@ -22,7 +21,7 @@ $(UNITTEST): unittest/unittest.o redis_cluster.o
 $(SIMPLE): example/simple.o redis_cluster.o
 	$(CXX) $^ -o $@ $(LIBS)
 
-$(FOREVER): test/forever.o redis_cluster.o
+$(INFINITE): test/infinite.o redis_cluster.o
 	$(CXX) $^ -o $@ $(LIBS)
 
 $(STATIC): redis_cluster.o

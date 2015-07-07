@@ -71,8 +71,7 @@ redisReply* Cluster::run(const std::vector<std::string> &commands) {
     do{
         std::ostringstream ss;
         ss << "#" << cmd << "#";
-        const char *p = strstr(UNSUPPORT, ss.str().c_str());
-        if( p ) {
+        if( strstr(UNSUPPORT, ss.str().c_str()) ) {
             set_error(E_COMMANDS) << "command [" << cmd << "] not supported";
             return NULL;
         }

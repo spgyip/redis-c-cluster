@@ -20,15 +20,44 @@ int main(int argc, char *argv[])
     }
  
     std::vector<std::string> commands;
+
+    /* set
+     */
+    std::cerr << "set foo ..." << std::endl;
     commands.push_back("SET");   
     commands.push_back("foo");   
     commands.push_back("hello world");
     redisReply *reply = cluster->run(commands);
     if( !reply ) {
-        std::cerr << "(error)" << cluster->strerr() << ", " << cluster->err() << std::endl;
-        return 1;
+        std::cerr << "(error) " << cluster->strerr() << ", " << cluster->err() << std::endl;
+    } else if( reply->type==REDIS_REPLY_ERROR ) {
+        std::cerr << "(error) " << reply->str << std::endl;
+    } else {
+        std::cout << "[SET DONE] " << "set " << commands[1] << " '" << commands[2] << "' " << std::endl;
     }
-    std::cout << "[DONE] " << "set " << commands[1] << " '" << commands[2] << "' " << std::endl;
     freeReplyObject( reply );
+
+    /* get
+     */
+    std::cerr << "get foo ..." << std::endl;
+    commands.clear();
+    commands.push_back("GET");
+    commands.push_back("foo");
+    reply = cluster->run(commands);
+    if( !reply ) {
+        std::cerr << "(error) " << cluster->strerr() << ", " << cluster->err() << std::endl;
+    } else if( reply->type==REDIS_REPLY_ERROR ) {
+        std::cerr << "(error) " << reply->str << std::endl;
+    }else if( reply->type==REDIS_REPLY_NIL ) {
+        std::cerr << "(nil)" << std::endl;
+    } else if (reply->type==REDIS_REPLY_STRING){ 
+        std::cerr << "[GET DONE] " << reply->str << std::endl;
+    } else {
+        std::cerr << "(error) unexpected reply type " << reply->type << std::endl;
+    }
+    freeReplyObject( reply );
+
+    delete cluster;
+
     return 0;
 }
