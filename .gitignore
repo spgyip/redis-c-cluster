@@ -2,9 +2,12 @@
 unittest/unittest
 example/simple
 test/infinite
+test/interact
 libredis_cluster.a
 
 example/test.cpp
+
+Makefile 
 
 # ctags
 tags

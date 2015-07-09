@@ -1,4 +1,3 @@
-#!/bin/bash
 
 if [ "X$HIREDIS_LIB" = "X" ]
 then
