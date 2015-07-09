@@ -1,0 +1,37 @@
+#!/bin/bash
+
+if [ "X$HIREDIS_LIB" = "X" ]
+then
+    p=$(find /usr/ -name libhiredis.a|head -n 1)
+    [ "X$p" != "X" ] && HIREDIS_LIB=$p
+fi
+if [ "X$HIREDIS_LIB" = "X" -o ! -f "$HIREDIS_LIB" ]
+then
+    echo "(error) hiredis is required."
+    echo "(error) or you can use --with-hiredis to locate the existing hiredis library"
+    exit 1
+fi
+echo "with hiredis $HIREDIS_LIB ..."
+
+if [ "X$GTEST_LIB" = "X" ]
+then
+    p=$(find /usr/ -name libgtest.a|head -n 1)
+    [ "X$p" != "X" ] && GTEST_LIB=$p
+fi
+if [ "X$GTEST_LIB" = "X" -o ! -f "$GTEST_LIB" ]
+then
+    echo "(warn) gtest not found, which is needed by unittest."
+    echo "(warn) the unittest will be build-in."
+    echo "(warn) or you can use --with-gtest to locate the existing gtest library."
+else
+    HAVE_GTEST=yes
+fi
+
+if [ $HAVE_GTEST = "yes" ]
+then
+    echo "with gtest $GTEST_LIB ..."
+else
+    echo "without gtest ..."
+fi
+
+

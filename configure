@@ -1,4 +1,51 @@
 #!/bin/bash
 
-cat << EOF >> abc
-EOF
+# Copyright (C) supergui@live.cn
+
+HELP=no
+MAKEFILE="Makefile"
+
+PREFIX="/usr/local/"
+INSTALL_HEADER=${PREFIX}/include/
+INSTALL_LIB=${PREFIX}/lib/
+HIREDIS_LIB=""
+GTEST_LIB=""
+
+HAVE_GTEST=no
+IF_DEBUG=no
+
+for option
+do
+    case $option in
+        -*=*) value=`echo "$option" | sed -e 's/[-_a-zA-Z0-9]*=//'` ;;
+           *) value=""
+    esac
+
+    case $option in
+         --help)             HELP=yes                                ;;
+         --with-hiredis=*)   HIREDIS_LIB=$value                      ;;
+         --with-gtest=*)     GTEST_LIB=$value                        ;;
+ 	 --debug)	     IF_DEBUG=yes			     ;;
+         *) 
+            echo "error: invalid option $option"
+            exit 1
+         ;;
+    esac
+done
+
+if [ $HELP = "yes" ]
+then
+    echo ""
+    echo "--help                     help message"
+    echo ""
+    echo "--with-hredis=DIR          set path to hiredis library"
+    echo "--with-gtest=DIR           set path to gtest library"
+    echo ""
+    exit 0
+fi
+
+. auto/have
+
+echo -ne "" > $MAKEFILE
+
+. auto/gen
