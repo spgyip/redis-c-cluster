@@ -91,7 +91,7 @@ int main(int argc, char *argv[])
             cache_[key] = value_write;
         }
 
-        usleep( 1000*1000 );
+        usleep( 1000*10 );
 
         if( last_t != now_sec_ ) {
             last_t = now_sec_;
@@ -112,7 +112,7 @@ int redis_set(const std::string &key, const std::string& value) {
     commands.push_back(value);   
     redisReply *reply = cluster_->run(commands);
     if( !reply ) {
-        return -1;
+        ret = -1;
     } else if( reply->type==REDIS_REPLY_STATUS && !strcmp(reply->str, "OK") ) {
         ret = 0;
     } else if( reply->type==REDIS_REPLY_ERROR ){
@@ -121,7 +121,10 @@ int redis_set(const std::string &key, const std::string& value) {
     } else {
         ret = -1;
     }
-    freeReplyObject( reply );
+
+    if( reply )
+        freeReplyObject( reply );
+
     return ret;
 }
 int redis_get(const std::string &key, std::string& value) {
@@ -131,7 +134,7 @@ int redis_get(const std::string &key, std::string& value) {
     commands.push_back(key);   
     redisReply *reply = cluster_->run(commands);
     if( !reply ) {
-        return -1;
+        ret = -1;
     } else if( reply->type==REDIS_REPLY_NIL ) {
         ret = 1; //not found
     } else if( reply->type==REDIS_REPLY_STRING ) {
@@ -143,6 +146,9 @@ int redis_get(const std::string &key, std::string& value) {
     } else {
         ret = -1;
     }
-    freeReplyObject(reply);
+
+    if( reply )
+        freeReplyObject( reply );
+
     return ret;
 }

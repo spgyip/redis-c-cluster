@@ -35,7 +35,9 @@ int main(int argc, char *argv[])
     } else {
         std::cout << "[SET DONE] " << "set " << commands[1] << " '" << commands[2] << "' " << std::endl;
     }
-    freeReplyObject( reply );
+
+    if( reply )
+        freeReplyObject( reply );
 
     /* get
      */
@@ -55,7 +57,9 @@ int main(int argc, char *argv[])
     } else {
         std::cerr << "(error) unexpected reply type " << reply->type << std::endl;
     }
-    freeReplyObject( reply );
+
+    if( reply )
+        freeReplyObject( reply );
 
     delete cluster;
 
