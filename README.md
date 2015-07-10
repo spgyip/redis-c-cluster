@@ -11,7 +11,7 @@ The principle is that only data read/write commands are supported in cluster mod
 None-key commands are not supported in cluster mode, for example, INFO/SHUTDOWN.
 Multi-keys commands are not supported yet, it will be in the future issue.
 
-It's not reality to list all unsupported commands here, so just follow the principle.
+It's difficult to list all unsupported commands here, but you will understand the principle just mentioned.
 Explicitly unsupported commands are as followed.
 * INFO
 * SHUTDOWN
@@ -21,6 +21,7 @@ Explicitly unsupported commands are as followed.
 
 # Example
   Lookup example/ for more examples.
+  There are some interesting test codes in test/, you can play with them too.
 ```cpp
 if( cluster->setup("127.0.0.1:7000, 127.0.0.1:7001", true)!=0 ) {
     std::cerr << "cluster setup fail" << std::endl;
@@ -43,13 +44,14 @@ freeReplyObject(reply);
 ```
 
 # Install
-  make && make install
+  ./configure && make && make install
 * c++ 11 is required.
-* gtest is required for unittest.
+* gtest is optional for unittest.
 * hiredis is required for redis api.
 
 # DEBUG
-  Remove Makefile's '-DDEBUG' to avoid debug message, which will be printed to standard output.
+  To open debug message, use --debug.
+  ./configure --debug
 
 # Future
 * Reentrance support.

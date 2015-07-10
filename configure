@@ -22,14 +22,15 @@ do
     esac
 
     case $option in
-         --help)             HELP=yes                                ;;
-         --with-hiredis=*)   HIREDIS_LIB=$value                      ;;
-         --with-gtest=*)     GTEST_LIB=$value                        ;;
- 	 --debug)	     IF_DEBUG=yes			     ;;
-         *) 
+        --help)             HELP=yes                                ;;
+        --prefix=*)         PREFIX=$value                           ;;
+        --with-hiredis=*)   HIREDIS_LIB=$value                      ;;
+        --with-gtest=*)     GTEST_LIB=$value                        ;;
+ 	    --debug)	         IF_DEBUG=yes			                 ;;
+        *) 
             echo "error: invalid option $option"
             exit 1
-         ;;
+        ;;
     esac
 done
 
@@ -38,8 +39,10 @@ then
     echo ""
     echo "--help                     help message"
     echo ""
+    echo "--prefix=DIR               set installation prefix"
     echo "--with-hredis=DIR          set path to hiredis library"
     echo "--with-gtest=DIR           set path to gtest library"
+    echo "--debug                    build debug version"
     echo ""
     exit 0
 fi

@@ -1,10 +1,16 @@
 
+CXXFLAGS="-g -Wall -o2 -std=c++0x"
+if [ ${IF_DEBUG} = "yes" ]
+then
+    CXXFLAGS="${CXXFLAGS} -DDEBUG"
+fi
+
 cat << EOF >> $MAKEFILE
 
 CXX=g++
 CC=cc
 AR=ar
-CXXFLAGS=-g -Wall -o2 -std=c++0x -DDEBUG
+CXXFLAGS=${CXXFLAGS}
 
 LIB_HIREDIS=${HIREDIS_LIB}
 LIBS=\$(LIB_HIREDIS)
@@ -59,6 +65,9 @@ clean:
 	rm -rfv *.o unittest/*.o example/*.o test/*.o \$(TARGETS)
 
 install:
-	cp redis_cluster.hpp /usr/local/include/
+	mkdir -p ${PREFIX}/include
+	mkdir -p ${PREFIX}/lib
+	cp -a redis_cluster.hpp ${PREFIX}/include/
+	cp -a \$(STATIC) ${PREFIX}/lib/
 
 EOF
