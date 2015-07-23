@@ -11,6 +11,10 @@
 struct StatS {
     int read;
     int write;
+    int read_t;
+    int write_t;
+    int total_read;
+    int total_write;
     int read_error;
     int write_error;
     int unmatch;
@@ -21,6 +25,7 @@ typedef CacheType::iterator CacheIter;
 CacheType cache_;
 int now_sec_ = 0;
 int now_us_ = 0;
+int last_us_ = 0;
 redis::cluster::Cluster *cluster_ = NULL;
 struct StatS stat_;
 
@@ -36,6 +41,18 @@ std::string get_random_value() {
     std::ostringstream ss;
     ss << "value_" << n;
     return ss.str();
+}
+
+int check_point() {
+    struct timeval tv;
+    gettimeofday( &tv, NULL );
+    now_sec_ = tv.tv_sec;
+    now_us_ = tv.tv_sec*1000000 + tv.tv_usec;
+
+    int ret = now_us_ - last_us_;
+    last_us_ = now_us_;
+
+    return ret;
 }
 
 int redis_set(const std::string &key, const std::string& value);
@@ -56,11 +73,8 @@ int main(int argc, char *argv[])
     }
 
     int last_t = 0;
+    check_point();
     while( true ) {
-        struct timeval tv;
-        gettimeofday( &tv, NULL );
-        now_sec_ = tv.tv_sec;
-        now_us_ = tv.tv_sec*1000000 + tv.tv_usec;
         srand( now_us_ );
     
         std::string key = get_random_key();
@@ -69,8 +83,10 @@ int main(int argc, char *argv[])
 
         /* check 
          */
+    	check_point();
         int rv = redis_get(key, value_read);
         stat_.read ++;
+        stat_.total_read ++;
         if( rv<0 ) {
             stat_.read_error ++;
         } else {
@@ -80,24 +96,29 @@ int main(int argc, char *argv[])
                     stat_.unmatch ++;
             }
         }
+	stat_.read_t += check_point();
 
         /* set
          */
         rv = redis_set(key, value_write);
         stat_.write ++;
+        stat_.total_write ++;
         if( rv<0 ) {
             stat_.write_error ++;
         } else {
             cache_[key] = value_write;
         }
+	stat_.write_t += check_point();
 
         usleep( 1000*10 );
 
         if( last_t != now_sec_ ) {
             last_t = now_sec_;
-            std::cout << stat_.read << " R(" << stat_.read_error << " err) | " 
-                      << stat_.write << " W(" << stat_.write_error << " err) | "
+            std::cout << stat_.total_read << " R(" << stat_.read_error << " err, " << stat_.read_t/stat_.read << " usec per op ) | " 
+                      << stat_.total_write << " W(" << stat_.write_error << " err, " << stat_.write_t/stat_.write<< " usec per op ) | "
                       << stat_.unmatch << " UNMATCH" << std::endl;
+	    stat_.read_t = stat_.write_t = 0;
+	    stat_.read = stat_.write = 0;
         }
     }
 
