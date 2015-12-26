@@ -273,6 +273,33 @@ uint16_t Cluster::get_key_hash(const std::string &key) {
     return crc16(hashing_key.c_str(), hashing_key.length());
 }
 
+redisContext *Cluster::get_connection(const NodeInfoType& node) {
+    redisContext *c = NULL;
+    ConnectionsCIter citer = connections_.find( node );
+    if( citer!=connections_.end() ) { 
+        c = (redisContext *)citer->second;
+    }
+    else {
+
+        c = redisConnect( node.host.c_str(), node.port );
+        if( c && c->err )  { //next ttl
+            DEBUGINFO("redis connect error " << node.host << ":" << node.port);
+            redisFree( c );
+            c = NULL;
+        }
+        else
+            connections_.insert( std::make_pair(node, c) );
+
+   }
+
+   return c;
+}
+int Cluster::invalid_connection(const NodeInfoType& node, redisContext *c) {
+    redisFree( c );
+    connections_.erase( node );
+    return 0;
+}
+
 redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const char **argv, const size_t *argvlen) {
     uint16_t hashing = get_key_hash(key);
     int ttl = 5;
@@ -304,57 +331,34 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
                 return NULL;
             }
 
-        } else {
+        } else {//find slot
 
             node = slots_[slot];
             if( node.host.empty() ) { //not hit
+                DEBUGINFO("slot not hit, try connection from startup nodes.");
+                try_random_node = true;//try random next ttl
+                continue;
+            }
 
-                DEBUGINFO("slot not hit, try get connection from startup nodes.");
-                c = get_random_from_startup(&node);
-                if( !c ) {
-                    set_error(E_SLOT_MISSED) << "slot missed " << slot << ", key. and try get random node fail. " << key;
-                    return NULL;
-                }
-
-            } else {
-
-                DEBUGINFO("slot " << slot << " hit at " << node.host << ":" << node.port);
-
+            DEBUGINFO("slot " << slot << " hit at " << node.host << ":" << node.port);
+            c = get_connection( node );
+            if( !c ) {
+                DEBUGINFO("get connection fail " << node.host << ":" << node.port);
+                try_random_node = true;//try random next ttl
+                continue;
             }
 
         }
-        
-        if( !c ) {
 
-            ConnectionsCIter citer = connections_.find( node );
-            if( citer==connections_.end() ) { 
-
-                c = redisConnect( node.host.c_str(), node.port );
-                if( c && c->err )  { //next ttl
-                    redisFree( c );
-                    set_error(E_IO) << "redis connect error " << node.host << ":" << node.port;
-                    try_random_node = true;//try random next ttl
-                    DEBUGINFO("redis connect error " << node.host << ":" << node.port);
-                    continue;
-                }
-                connections_.insert( std::make_pair(node, c) );
-
-            } else {//connection already exists
-
-                c = (redisContext *)citer->second;
-
-            }
-
-        }
-        
         reply = (redisReply *)redisCommandArgv(c, argc, argv, argvlen);
         if( !reply ) {//next ttl
 
-            redisFree( c );
-            connections_.erase( node );
+            DEBUGINFO("redisCommandArgv error. " << c->errstr << "(" << c->err << ")");
+            invalid_connection( node, c );
             set_error(E_IO) << "redisCommandArgv error. " << c->errstr << "(" << c->err << ")";
             try_random_node = true;//try random next ttl
-            DEBUGINFO("redisCommandArgv error. " << c->errstr << "(" << c->err << ")");
+
+            continue;
 
         } else if( reply->type==REDIS_REPLY_ERROR 
             &&(!strncmp(reply->str,"MOVED",5) || !strcmp(reply->str,"ASK")) ) { //next ttl
@@ -376,13 +380,10 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
             load_slots_asap_ = true;//cluster nodes must have being changed, load slots cache as soon as possible.
             DEBUGINFO( "redirect to [" << slot << "] " << slots_[slot].host << ", " << slots_[slot].port);
 
-        } else {
-
-            return reply;
+            continue;
 
         }
-
-        //next ttl
+        return reply;
     }
 
     set_error(E_TTL) << "max ttl fail";

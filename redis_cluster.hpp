@@ -26,6 +26,10 @@
 struct redisContext;
 struct redisReply;
 
+namespace redis3m {
+class simple_pool;
+}
+
 namespace redis {
 namespace cluster {
 
@@ -80,7 +84,7 @@ public:
         }
     };
 
-    typedef std::unordered_map<NodeInfoType, void *, KeyHasherS> ConnectionsType;//NodeInfoType=>redisContext
+    typedef std::unordered_map<NodeInfoType, void *, KeyHasherS> ConnectionsType;//NodeInfoType=>redis3m::simple_pool
     typedef ConnectionsType::iterator ConnectionsIter;
     typedef ConnectionsType::const_iterator ConnectionsCIter;
 
@@ -135,6 +139,13 @@ private:
      *  For example {foo}key and other{foo} are in the same slot, which hashed with 'foo'.
      */
     uint16_t get_key_hash(const std::string &key);
+
+    /**
+     * @brief 
+     *  Get connection from connection pool.
+     */
+    redisContext *get_connection(const NodeInfoType& node);
+    int invalid_connection(const NodeInfoType& node, redisContext *c);
 
     /**
      *  Agent for connecting and run redisCommandArgv.

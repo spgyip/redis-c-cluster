@@ -8,7 +8,7 @@
 #include <map>
 #include <hiredis/hiredis.h>
 
-struct StatS {
+typedef struct {
     int read;
     int write;
     int read_t;
@@ -18,16 +18,25 @@ struct StatS {
     int read_error;
     int write_error;
     int unmatch;
-};
+}stat_item_t;
+
+typedef struct {
+    int now_sec_ = 0;
+    int now_us_ = 0;
+    int last_us_ = 0;
+}time_period_t;
 
 typedef std::map<std::string, std::string> CacheType;
 typedef CacheType::iterator CacheIter;
+
 CacheType cache_;
+
 int now_sec_ = 0;
 int now_us_ = 0;
 int last_us_ = 0;
+
 redis::cluster::Cluster *cluster_ = NULL;
-struct StatS stat_;
+stat_item_t stat_;
 
 std::string get_random_key() {
     int n = 10000*(rand()/(RAND_MAX+0.1));
@@ -74,8 +83,8 @@ int main(int argc, char *argv[])
 
     int last_t = 0;
     check_point();
+    srand( now_us_ );
     while( true ) {
-        srand( now_us_ );
     
         std::string key = get_random_key();
         std::string value_read;
