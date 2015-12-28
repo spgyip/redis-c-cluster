@@ -26,12 +26,10 @@
 struct redisContext;
 struct redisReply;
 
-namespace redis3m {
-class simple_pool;
-}
-
 namespace redis {
 namespace cluster {
+
+class ConnectionPool;
 
 class Cluster {
 public:
@@ -45,32 +43,31 @@ public:
         E_TTL = 4,
         E_OTHERS = 5 
     };
-
     typedef struct NodeInfoS{
 
-        std::string host;
-        int port;
-        
-        /**
-         * A comparison function for equality; 
-         * This is required because the hash cannot rely on the fact 
-         * that the hash function will always provide a unique hash value for every distinct key 
-         * (i.e., it needs to be able to deal with collisions), 
-         * so it needs a way to compare two given keys for an exact match. 
-         * You can implement this either as a class that overrides operator(), 
-         * or as a specialization of std::equal, 
-         * or – easiest of all – by overloading operator==() for your key type (as you did already).
-         */
-        bool operator==(const struct NodeInfoS &other) const {
-            return (host==other.host && port==other.port);
-        }
+            std::string host;
+            int port;
 
-        bool operator<(const struct NodeInfoS &rs) const {
-            if( host<rs.host )
-                return true;
-            else
-                return port<rs.port;
-        }
+            /**
+             * A comparison function for equality; 
+             * This is required because the hash cannot rely on the fact 
+             * that the hash function will always provide a unique hash value for every distinct key 
+             * (i.e., it needs to be able to deal with collisions), 
+             * so it needs a way to compare two given keys for an exact match. 
+             * You can implement this either as a class that overrides operator(), 
+             * or as a specialization of std::equal, 
+             * or – easiest of all – by overloading operator==() for your key type (as you did already).
+             */
+            bool operator==(const struct NodeInfoS &other) const {
+                    return (host==other.host && port==other.port);
+            }
+
+            bool operator<(const struct NodeInfoS &rs) const {
+                    if( host<rs.host )
+                            return true;
+                    else
+                            return port<rs.port;
+            }
     }NodeInfoType, *NodeInfoPtr, &NodeInfoRef;
 
     /**
@@ -79,9 +76,9 @@ public:
      * One particularly straight-forward way of doing this is to specialize the std::hash template for your key-type.
      */
     struct KeyHasherS {
-        std::size_t operator()(const NodeInfoType &node) const {
-            return (std::hash<std::string>()(node.host) ^ std::hash<int>()(node.port));
-        }
+            std::size_t operator()(const NodeInfoType &node) const {
+                    return (std::hash<std::string>()(node.host) ^ std::hash<int>()(node.port));
+            }
     };
 
     typedef std::unordered_map<NodeInfoType, void *, KeyHasherS> ConnectionsType;//NodeInfoType=>redis3m::simple_pool
@@ -164,6 +161,23 @@ private:
 
     ErrorE errno_;
     std::ostringstream error_;
+};
+
+class Node 
+{
+public:
+    Node(const std::string& host, int port, int max_conn);
+    ~Node();
+
+    void *get_conn();
+    void put_conn(void *conn);
+
+private:
+    std::string host_;
+    int port_;
+    int max_conn_;
+
+    std::set<void *> connections_;
 };
 
 }//namespace cluster

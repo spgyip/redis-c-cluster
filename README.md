@@ -55,3 +55,4 @@ freeReplyObject(reply);
 
 # Future
 * Reentrance support.
+* Slave support.

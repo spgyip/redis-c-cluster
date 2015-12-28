@@ -349,7 +349,9 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
             }
 
         }
-
+    
+        //assert( c!=NULL );
+        
         reply = (redisReply *)redisCommandArgv(c, argc, argv, argvlen);
         if( !reply ) {//next ttl
 
@@ -380,6 +382,8 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
             load_slots_asap_ = true;//cluster nodes must have being changed, load slots cache as soon as possible.
             DEBUGINFO( "redirect to [" << slot << "] " << slots_[slot].host << ", " << slots_[slot].port);
 
+            freeReplyObject( reply );
+
             continue;
 
         }
@@ -401,5 +405,41 @@ int Cluster::test_key_hash(const std::string &key) {
     return get_key_hash(key);
 }
 
+/**
+ * class Node
+ */
+Node::Node(const std::string& host, int port, int max_conn) {
+    host_ = host;
+    port_ = port;
+    max_conn_ = max_conn;
+    next_ = 0;
+}
+
+Node::~Node() {
+
+}
+
+void *Node::get_conn() {
+
+    redisContext *conn = NULL;
+    for (std::set<void *>::iterator it = connections_.begin(); it != connections_.end(); ++it) {
+        conn = (redisContext *)(*it);
+        if( conn->err==REDIS_OK ) {
+            connections_.erase(it);
+            break;
+        }
+        connections_.erase(it);
+    }
+
+    if( !conn ) {
+        conn = redisConnect(host_.c_str(), port_);
+        if( conn && conn->err )
+            redisFree( conn );
+    }
+
+   return conn;
+}
+void put_conn(void *conn) {
+    conn_pool_.push_back( conn );
 }//namespace cluster
 }//namespace redis
