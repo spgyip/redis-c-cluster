@@ -19,8 +19,9 @@
 
 #include <string>
 #include <vector>
-#include <sstream>
+#include <list>
 #include <set>
+#include <sstream>
 #include <unordered_map>
 
 struct redisContext;
@@ -177,7 +178,7 @@ private:
     int port_;
     int max_conn_;
 
-    std::set<void *> connections_;
+    std::list<void *> connections_;
 };
 
 }//namespace cluster

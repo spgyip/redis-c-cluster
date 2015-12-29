@@ -412,34 +412,46 @@ Node::Node(const std::string& host, int port, int max_conn) {
     host_ = host;
     port_ = port;
     max_conn_ = max_conn;
-    next_ = 0;
 }
 
 Node::~Node() {
+
+    std::list<void *>::iterator iter = connections_.begin();
+    for(; iter!=connections_.end(); iter++) {
+        redisContext *conn = (redisContext *)*iter;
+        redisFree( conn );
+    }
 
 }
 
 void *Node::get_conn() {
 
     redisContext *conn = NULL;
-    for (std::set<void *>::iterator it = connections_.begin(); it != connections_.end(); ++it) {
-        conn = (redisContext *)(*it);
-        if( conn->err==REDIS_OK ) {
-            connections_.erase(it);
+    for(;connections_.size()>0;) {
+        conn = (redisContext *)connections_.back();
+        connections_.pop_back();
+
+        if( conn->err==REDIS_OK ) 
             break;
-        }
-        connections_.erase(it);
+
+        redisFree( conn );
+        conn = NULL;
     }
 
     if( !conn ) {
         conn = redisConnect(host_.c_str(), port_);
-        if( conn && conn->err )
+        if( conn && conn->err ) {
             redisFree( conn );
+            conn = NULL;
+        }
     }
 
    return conn;
 }
-void put_conn(void *conn) {
-    conn_pool_.push_back( conn );
+
+void Node::put_conn(void *conn) {
+    connections_.push_front( conn );
+}
+
 }//namespace cluster
 }//namespace redis
