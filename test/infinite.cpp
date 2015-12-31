@@ -21,9 +21,9 @@ typedef struct {
 }stat_item_t;
 
 typedef struct {
-    int now_sec_ = 0;
-    int now_us_ = 0;
-    int last_us_ = 0;
+    int now_sec_;
+    int now_us_;
+    int last_us_;
 }time_period_t;
 
 typedef std::map<std::string, std::string> CacheType;
