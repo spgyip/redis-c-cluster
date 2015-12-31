@@ -42,9 +42,11 @@ if [ $HAVE_GTEST = "yes" ]
 then
 cat << EOF >> $MAKEFILE
 
-\$(UNITTEST): redis_cluster.o
-	\$(CXX) \$(CXXFLAGS)  -std=c++0x -c -o unittest/unittest.o unittest/unittest.cc
-	\$(CXX) unittest/unittest.o $^ -o \$@ \$(LIBS) ${GTEST_LIB} -lpthread
+unittest/unittest.o: unittest/unittest.cc
+        \$(CXX) \$(CXXFLAGS)  -std=c++0x -c -o \$@ \$^
+
+\$(UNITTEST): unittest/unittest.o redis_cluster.o
+	\$(CXX) $^ -o \$@ \$(LIBS) ${GTEST_LIB} -lpthread
 
 EOF
 fi

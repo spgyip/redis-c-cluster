@@ -99,7 +99,7 @@ Cluster::~Cluster() {
         delete node;
     }
     node_pool_.clear();
-    
+
 }
 
 int Cluster::setup(const char *startup, bool lazy) {
@@ -159,13 +159,28 @@ std::ostringstream& Cluster::set_error(ErrorE e) {
     error_.str("");
     return error_;
 }
+
+bool Cluster::add_node(const std::string &host, int port, Node *&rpnode) {
+    Node *node = new Node(host, port);
+    assert( node );
+
+    std::pair<NodePoolType::iterator, bool> reti = node_pool_.insert(node);
+    rpnode = *(reti.first);
+
+    if(reti.second) {
+        return true;
+    } else {
+        delete node;
+        return false;
+    }
+}
+
 int Cluster::parse_startup(const char *startup) {
     char *p1, *p2, *p3;
     char *tmp = (char *)malloc( strlen(startup)+1 );
     memcpy(tmp, startup, strlen(startup)+1);
     int  port;
     std::string host;
-    Node *node;
 
     p1 = p2 = tmp;
     do {
@@ -188,13 +203,12 @@ int Cluster::parse_startup(const char *startup) {
 
             host = p1;   //get host
 
-            node = new Node(host, port);
-            assert( node );
-            if(node_pool_.insert(node).second) {
-                DEBUGINFO("parse startup add " << node->simple_dump());
-            }
-            else { 
-                delete node;
+            Node *node_in_pool;
+            bool ret = add_node(host, port, node_in_pool);
+            if(ret) {
+                DEBUGINFO("parse startup add " << node_in_pool->simple_dump());
+            } else {
+                DEBUGINFO("parse startup duplicate " << node_in_pool->simple_dump() << " ignored");
             }
         }
         if( p2 )
@@ -251,19 +265,14 @@ int Cluster::load_slots_cache() {
                 || innr->element[1]->type!=REDIS_REPLY_INTEGER )
                 continue;
 
-            Node *newnode = new Node(innr->element[0]->str, innr->element[1]->integer);
-            assert( newnode );
-
-            std::pair<NodePoolType::iterator, bool> ret = node_pool_.insert(newnode);
-            if(ret.second) {
-                DEBUGINFO("insert new node "<< newnode->simple_dump()<< " from cluster slots map" );
-            }
-            else {
-                delete newnode;
+            Node *node_in_pool;
+            bool ret = add_node(innr->element[0]->str, innr->element[1]->integer, node_in_pool);
+            if(ret) {
+                DEBUGINFO("insert new node "<< node_in_pool->simple_dump()<< " from cluster slots map" );
             }
 
             for(int jj=start; jj<=end; jj++)
-                slots_[jj] = *(ret.first);
+                slots_[jj] = node_in_pool;
 
             count += (end-start+1);
         }//for i
@@ -305,6 +314,7 @@ Node *Cluster::get_random_node(const Node *last) {
     for(size_t i = 0; i < len; i++) {
         if(iter == node_pool_.end())
             iter = node_pool_.begin();
+        DEBUGINFO("get_random_node try "<<(*iter)->simple_dump());
         if(*iter != last) {
             return *iter;
         }
@@ -399,19 +409,19 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
             *p = '\0';
 
             assert( slot == atoi(s+1) );
-            
+
             s = strchr(p+1,':');    /* MOVED 3999[P]127.0.0.1[S]6381 */
             *s = '\0';
 
-            Node *newnode = new Node(p+1, atoi(s+1));
-            std::pair<NodePoolType::iterator, bool> ret = node_pool_.insert(newnode);
-            if(ret.second) {
-                DEBUGINFO("insert new node "<< newnode->simple_dump()<< " from redirection" );
+            Node *node_in_pool;
+            bool ret = add_node(p+1, atoi(s+1), node_in_pool);
+            if(ret) {
+                DEBUGINFO("insert new node "<< node_in_pool->simple_dump()<< " from redirection" );
             } else {
-                DEBUGINFO("redirect slot "<< slot <<" to " << newnode->simple_dump());
-                delete newnode;
+                DEBUGINFO("redirect slot "<< slot <<" to " << node_in_pool->simple_dump())
             }
-            slots_[slot] = (Node *)&(*ret.first);
+
+            slots_[slot] = node_in_pool;
 
             load_slots_asap_ = true;//cluster nodes must have being changed, load slots cache as soon as possible.
             freeReplyObject( reply );
@@ -431,7 +441,7 @@ int Cluster::test_parse_startup(const char *startup) {
     return parse_startup( startup );
 }
 
-Cluster::NodePoolType& Cluster::get_startup_nodes() {
+Cluster::NodePoolType & Cluster::get_startup_nodes() {
     return node_pool_;
 }
 int Cluster::test_key_hash(const std::string &key) {

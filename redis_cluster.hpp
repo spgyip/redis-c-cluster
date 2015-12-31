@@ -145,6 +145,7 @@ public:/* for unittest */
 
 private:
     std::ostringstream& set_error(ErrorE e);
+    bool add_node(const std::string &host, int port, Node *&rpnode);
     int parse_startup(const char *startup);
     int load_slots_cache();
     int clear_slots_cache();
