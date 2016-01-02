@@ -22,6 +22,7 @@
 #include <list>
 #include <set>
 #include <sstream>
+#include <cassert>
 #include <stdint.h>
 
 struct redisContext;
@@ -80,6 +81,7 @@ private:
     int         max_conn_;
 
     std::list<void *>  connections_;
+    pthread_spinlock_t lock_;
 };
 
 
@@ -168,11 +170,32 @@ private:
     redisReply* redis_command_argv(const std::string& key, int argc, const char **argv, const size_t *argvlen);
 
     NodePoolType        node_pool_;
+    pthread_spinlock_t  np_lock_;
+    
     std::vector<Node *> slots_;
+    pthread_spinlock_t  load_slots_lock_;
+    
     bool                load_slots_asap_;
     ErrorE              errno_;
     std::ostringstream  error_;
 };
+
+
+class LockGuard
+{
+public:
+    explicit LockGuard(pthread_spinlock_t &lock):lock_(lock)
+    { pthread_spin_lock(&lock_); }
+    ~LockGuard()
+    { pthread_spin_unlock(&lock_); }
+
+    LockGuard(const LockGuard &lock_guard):lock_(lock_guard.lock_) { assert(false);}
+    LockGuard& operator=(const LockGuard &lock_guard) { assert(false);}
+
+private:
+    pthread_spinlock_t &lock_;
+};
+
 
 }//namespace cluster
 }//namespace redis

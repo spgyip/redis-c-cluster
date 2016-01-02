@@ -6,7 +6,6 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <cassert>
 #include <set>
 #include <iterator>
 #include <hiredis/hiredis.h>
@@ -39,6 +38,8 @@ Node::Node(const std::string& host, int port, int max_conn) {
     host_ = host;
     port_ = port;
     max_conn_ = max_conn;
+    int ret = pthread_spin_init(&lock_,PTHREAD_PROCESS_PRIVATE);
+    assert(ret == 0);
 }
 
 Node::~Node() {
@@ -54,17 +55,21 @@ Node::~Node() {
 void *Node::get_conn() {
 
     redisContext *conn = NULL;
-    for(; connections_.size()>0;) {
-        conn = (redisContext *)connections_.back();
-        connections_.pop_back();
 
-        if( conn->err==REDIS_OK )
-            break;
+    {
+        LockGuard lg(lock_);
+        for(; connections_.size()>0;) {
+            conn = (redisContext *)connections_.back();
+            connections_.pop_back();
 
-        redisFree( conn );
-        conn = NULL;
+            if( conn->err==REDIS_OK )
+                break;
+
+            redisFree( conn );
+            conn = NULL;
+        }
+
     }
-
     if( !conn ) {
         conn = redisConnect(host_.c_str(), port_);
         if( conn && conn->err ) {
@@ -77,6 +82,7 @@ void *Node::get_conn() {
 }
 
 void Node::put_conn(void *conn) {
+    LockGuard lg(lock_);
     connections_.push_front( conn );
 }
 
@@ -88,6 +94,12 @@ std::string Node::simple_dump() const {
 
 Cluster::Cluster()
     :load_slots_asap_(false), errno_(E_OK) {
+
+    int ret = pthread_spin_init(&np_lock_, PTHREAD_PROCESS_PRIVATE);
+    assert(ret == 0);
+
+    ret = pthread_spin_init(&load_slots_lock_, PTHREAD_PROCESS_PRIVATE);
+    assert(ret == 0);
 }
 
 Cluster::~Cluster() {
@@ -164,6 +176,8 @@ bool Cluster::add_node(const std::string &host, int port, Node *&rpnode) {
     Node *node = new Node(host, port);
     assert( node );
 
+    LockGuard lg(np_lock_);
+    
     std::pair<NodePoolType::iterator, bool> reti = node_pool_.insert(node);
     rpnode = *(reti.first);
 
@@ -227,10 +241,23 @@ int Cluster::load_slots_cache() {
     int count = 0;
     redisReply *reply, *subr, *innr;
     Node *node;
+    std::vector<Node *> node_seeds;
 
-    NodePoolType::iterator iter = node_pool_.begin();
-    for(; iter != node_pool_.end(); iter++) {
-        node = *iter;
+    if(pthread_spin_trylock(&load_slots_lock_) != 0)
+    {
+        return 0;   // only one thread is allowed to process loading
+    }
+
+    {
+        LockGuard lg(np_lock_);
+        NodePoolType::iterator iter = node_pool_.begin();
+        for(; iter != node_pool_.end(); iter++) {
+            node_seeds.push_back(*iter);
+        }
+    }
+
+    for(size_t node_idx = 0; node_idx < node_seeds.size(); node_idx++) {
+        node = node_seeds[node_idx];
 
         redisContext *c = (redisContext *)node->get_conn();
         if( !c ) {
@@ -283,12 +310,13 @@ int Cluster::load_slots_cache() {
 
     }//for citer
 
-    if( iter != node_pool_.end() )  {
+    if( count>0 )  {
         DEBUGINFO("load_slots_cache count " << count <<"("<< (count == HASH_SLOTS? "complete":"incomplete!")<<") from " << node->simple_dump());
     } else {
         DEBUGINFO("load_slots_cache fail from all startup node");
     }
 
+    pthread_spin_unlock(&load_slots_lock_);
     return count;
 }
 
@@ -302,16 +330,19 @@ int Cluster::clear_slots_cache() {
 }
 
 Node *Cluster::get_random_node(const Node *last) {
-    std::size_t len = node_pool_.size();
-    if( len==0 )
-        return NULL;
 
     struct timeval tp;
     gettimeofday(&tp, NULL);
 
+    LockGuard lg(np_lock_);
+    
+    std::size_t len = node_pool_.size();
+    if( len==0 )
+        return NULL;
+
     NodePoolType::iterator iter = node_pool_.begin();
     std::advance( iter, tp.tv_usec % len );//random position
-    for(size_t i = 0; i < len; i++) {
+    for(size_t i = 0; i < len; i++,iter++) {
         if(iter == node_pool_.end())
             iter = node_pool_.begin();
         DEBUGINFO("get_random_node try "<<(*iter)->simple_dump());
@@ -373,7 +404,7 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
 
             node = slots_[slot];
             if( !node ) { //not hit
-                DEBUGINFO("slot "<<slot<<"don't have node, try connection from random node.");
+                DEBUGINFO("slot "<<slot<<" don't have node, try connection from random node.");
                 try_random_node = true;//try random next ttl
                 continue;
             }

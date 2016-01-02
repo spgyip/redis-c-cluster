@@ -54,13 +54,13 @@ fi
 cat << EOF >> $MAKEFILE
 
 \$(SIMPLE): example/simple.o redis_cluster.o
-	\$(CXX) $^ -o \$@ \$(LIBS)
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
 \$(INFINITE): test/infinite.o redis_cluster.o
-	\$(CXX) $^ -o \$@ \$(LIBS)
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
 \$(INTERACT): test/interact.o redis_cluster.o
-	\$(CXX) $^ -o \$@ \$(LIBS)
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
 \$(STATIC): redis_cluster.o
 	\$(AR) rc \$@ $^
