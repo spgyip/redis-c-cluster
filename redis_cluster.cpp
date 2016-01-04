@@ -177,7 +177,7 @@ bool Cluster::add_node(const std::string &host, int port, Node *&rpnode) {
     assert( node );
 
     LockGuard lg(np_lock_);
-    
+
     std::pair<NodePoolType::iterator, bool> reti = node_pool_.insert(node);
     rpnode = *(reti.first);
 
@@ -243,8 +243,7 @@ int Cluster::load_slots_cache() {
     Node *node;
     std::vector<Node *> node_seeds;
 
-    if(pthread_spin_trylock(&load_slots_lock_) != 0)
-    {
+    if(pthread_spin_trylock(&load_slots_lock_) != 0) {
         return 0;   // only one thread is allowed to process loading
     }
 
@@ -335,7 +334,7 @@ Node *Cluster::get_random_node(const Node *last) {
     gettimeofday(&tp, NULL);
 
     LockGuard lg(np_lock_);
-    
+
     std::size_t len = node_pool_.size();
     if( len==0 )
         return NULL;

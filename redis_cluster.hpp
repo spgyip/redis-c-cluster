@@ -25,15 +25,10 @@
 #include <cassert>
 #include <stdint.h>
 
-struct redisContext;
 struct redisReply;
 
 namespace redis {
 namespace cluster {
-
-
-class Node;
-struct CompareNodeFunc;
 
 class Node {
 public:
@@ -44,28 +39,20 @@ public:
     void put_conn(void *conn);
 
     /**
-         * A comparison function for equality;
-         * This is required because the hash cannot rely on the fact
-         * that the hash function will always provide a unique hash value for every distinct key
-         * (i.e., it needs to be able to deal with collisions),
-         * so it needs a way to compare two given keys for an exact match.
-         * You can implement this either as a class that overrides operator(),
-         * or as a specialization of std::equal,
-         * or -easiest of all -by overloading operator==() for your key type (as you did already).
-         */
+     * A comparison function for equality;
+     * This is required because the hash cannot rely on the fact
+     * that the hash function will always provide a unique hash value for every distinct key
+     * (i.e., it needs to be able to deal with collisions),
+     * so it needs a way to compare two given keys for an exact match.
+     * You can implement this either as a class that overrides operator(),
+     * or as a specialization of std::equal,
+     * or -easiest of all -by overloading operator==() for your key type (as you did already).
+     */
     bool operator==(const Node &other) const {
         return host_ == other.host_ && port_ == other.port_;
     }
 
     bool operator<(const Node &rs) const {
-        if( host_<rs.host_ )
-            return true;
-        else if ( host_==rs.host_ )
-            return port_<rs.port_;
-        else
-            return false;
-    }
-    bool smaller(const Node &rs) const {
         if( host_<rs.host_ )
             return true;
         else if ( host_==rs.host_ )
@@ -110,27 +97,27 @@ public:
     virtual ~Cluster();
 
     /**
-         *  Setup with startup nodes.
-         *
-         * @param
-         *  startup - '127.0.0.1:7000, 127.0.0.1:8000'
-         *  lazy    - if set false, load slot cache immediately when setup.
-         *            otherwise the slots cache will be loaded later when first command is executed..
-         *
-         * @return
-         *  0 - success
-         *  <0 - fail
-         */
+     *  Setup with startup nodes.
+     *
+     * @param
+     *  startup - '127.0.0.1:7000, 127.0.0.1:8000'
+     *  lazy    - if set false, load slot cache immediately when setup.
+     *            otherwise the slots cache will be loaded later when first command is executed..
+     *
+     * @return
+     *   0 - success
+     *  <0 - fail
+     */
     int setup(const char *startup, bool lazy);
 
     /**
-         * Caller should call freeReplyObject to free reply.
-         *
-         * @return
-         *  not NULL - succ
-         *  NULL     - error
-         *             get the last error message with function err() & errstr()
-         */
+     * Caller should call freeReplyObject to free reply.
+     *
+     * @return
+     *  not NULL - succ
+     *  NULL     - error
+     *             get the last error message with function err() & errstr()
+     */
     redisReply* run(const std::vector<std::string> &commands);
 
     inline int err() const {
@@ -164,33 +151,38 @@ private:
      *  Max ttl(default 5) retries or redirects.
      *
      * @return
-     *  not NULL: success, return the redisReply object. Caller should call freeReplyObject to free reply object.
-     *  NULL    : error
+     *  not NULL - success, return the redisReply object. Caller should call freeReplyObject to free reply object.
+     *  NULL     - error
      */
     redisReply* redis_command_argv(const std::string& key, int argc, const char **argv, const size_t *argvlen);
 
     NodePoolType        node_pool_;
     pthread_spinlock_t  np_lock_;
-    
+
     std::vector<Node *> slots_;
     pthread_spinlock_t  load_slots_lock_;
-    
+
     bool                load_slots_asap_;
     ErrorE              errno_;
     std::ostringstream  error_;
 };
 
 
-class LockGuard
-{
+class LockGuard {
 public:
-    explicit LockGuard(pthread_spinlock_t &lock):lock_(lock)
-    { pthread_spin_lock(&lock_); }
-    ~LockGuard()
-    { pthread_spin_unlock(&lock_); }
+    explicit LockGuard(pthread_spinlock_t &lock):lock_(lock) {
+        pthread_spin_lock(&lock_);
+    }
+    ~LockGuard() {
+        pthread_spin_unlock(&lock_);
+    }
 
-    LockGuard(const LockGuard &lock_guard):lock_(lock_guard.lock_) { assert(false);}
-    LockGuard& operator=(const LockGuard &lock_guard) { assert(false);}
+    LockGuard(const LockGuard &lock_guard):lock_(lock_guard.lock_) {
+        assert(false);
+    }
+    LockGuard& operator=(const LockGuard &lock_guard) {
+        assert(false);
+    }
 
 private:
     pthread_spinlock_t &lock_;
