@@ -22,8 +22,9 @@
 #include <list>
 #include <set>
 #include <sstream>
-#include <cassert>
 #include <stdint.h>
+#include <stdlib.h>
+
 
 struct redisReply;
 
@@ -32,7 +33,7 @@ namespace cluster {
 
 class Node {
 public:
-    Node(const std::string& host, int port, int max_conn = -1);
+    Node(const std::string& host, int port);
     ~Node();
 
     void *get_conn();
@@ -61,14 +62,20 @@ public:
             return false;
     }
     std::string simple_dump() const;
+    std::string statistic_dump();
 
 private:
     std::string host_;
     int         port_;
-    int         max_conn_;
 
     std::list<void *>  connections_;
     pthread_spinlock_t lock_;
+
+    /* for statistic purpose begin */
+    unsigned long conn_get_count_;
+    unsigned long conn_reuse_count_;
+    unsigned long conn_put_count_;
+    /* for statistic purpose end */
 };
 
 
@@ -81,6 +88,7 @@ struct CompareNodeFunc {
 class Cluster {
 public:
     const static int HASH_SLOTS = 16384;
+    typedef std::set<Node *, CompareNodeFunc> NodePoolType;
 
     enum ErrorE {
         E_OK = 0,
@@ -90,8 +98,6 @@ public:
         E_TTL = 4,
         E_OTHERS = 5
     };
-
-    typedef std::set<Node *, CompareNodeFunc> NodePoolType;
 
     Cluster();
     virtual ~Cluster();
@@ -110,6 +116,7 @@ public:
      */
     int setup(const char *startup, bool lazy);
 
+
     /**
      * Caller should call freeReplyObject to free reply.
      *
@@ -119,13 +126,14 @@ public:
      *             get the last error message with function err() & errstr()
      */
     redisReply* run(const std::vector<std::string> &commands);
-
-    inline int err() const {
-        return errno_;
-    }
-    inline std::string strerr() const {
-        return error_.str();
-    }
+    int errno();
+    std::string errmsg();
+    /**
+     * @return
+     *  number of ttls used by last run()
+     */
+    int ttls();
+    std::string status_dump();
 
 public:/* for unittest */
     int test_parse_startup(const char *startup);
@@ -133,7 +141,12 @@ public:/* for unittest */
     int test_key_hash(const std::string &key);
 
 private:
-    std::ostringstream& set_error(ErrorE e);
+    typedef struct {
+        ErrorE             errno;
+        std::ostringstream errmsg;
+        int                ttls; //TTLs used by last call of run()
+    } ThreadDataType;
+
     bool add_node(const std::string &host, int port, Node *&rpnode);
     int parse_startup(const char *startup);
     int load_slots_cache();
@@ -156,6 +169,10 @@ private:
      */
     redisReply* redis_command_argv(const std::string& key, int argc, const char **argv, const size_t *argvlen);
 
+    inline ThreadDataType &specific_data();
+    static inline void  free_specific_data(void *sdata);
+    inline std::ostringstream& set_error(ErrorE e);
+
     NodePoolType        node_pool_;
     pthread_spinlock_t  np_lock_;
 
@@ -163,10 +180,9 @@ private:
     pthread_spinlock_t  load_slots_lock_;
 
     bool                load_slots_asap_;
-    ErrorE              errno_;
-    std::ostringstream  error_;
-};
 
+    pthread_key_t       key_;
+};
 
 class LockGuard {
 public:
@@ -178,10 +194,10 @@ public:
     }
 
     LockGuard(const LockGuard &lock_guard):lock_(lock_guard.lock_) {
-        assert(false);
+        abort();
     }
     LockGuard& operator=(const LockGuard &lock_guard) {
-        assert(false);
+        abort();
     }
 
 private:

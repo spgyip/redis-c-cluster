@@ -25,9 +25,20 @@ public:
     redis::cluster::Cluster *cluster_;
 };
 
+TEST_F(ClusterTestObj, errinfo) {
+    std::vector<std::string> cmd;
+    ASSERT_TRUE(cluster_->setup("",true) == 0);
+    redisReply* ret = cluster_->run(cmd);
+    ASSERT_FALSE(ret);
+    ASSERT_EQ(cluster_->errno(), redis::cluster::Cluster::E_COMMANDS);
+    ASSERT_TRUE(cluster_->errmsg().find("not supported") != std::string::npos);
+}
+
 TEST_F(ClusterTestObj, test_parse_startup) {
-    /* one host */
-    
+
+    ASSERT_TRUE(cluster_->setup("",true) == 0);
+    /* one host
+     */
     using redis::cluster::Cluster;
     Cluster::NodePoolType::iterator iter;
     Cluster::NodePoolType v;
@@ -90,7 +101,7 @@ TEST(CaseHashing, test_hash_key) {
     delete cluster;
 }
 
-TEST(CaseNodePool, test_all) {
+TEST(CaseNodePool, test_NodePoolType) {
     redis::cluster::Cluster::NodePoolType node_pool;
     redis::cluster::Cluster::NodePoolType::iterator iter;
     redis::cluster::Node node1("126.0.0.1", 6000);
@@ -130,7 +141,6 @@ TEST(CaseNodePool, test_all) {
     ASSERT_EQ(*iter, &node2);
 
     /* delete by ip and port */
-    
     node_pool.erase(&node11);
     node_pool.erase(&node22);
 

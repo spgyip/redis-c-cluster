@@ -57,7 +57,7 @@ cat << EOF >> $MAKEFILE
 	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
 \$(INFINITE): test/infinite.o redis_cluster.o
-	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread -lcurses
 
 \$(INTERACT): test/interact.o redis_cluster.o
 	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread

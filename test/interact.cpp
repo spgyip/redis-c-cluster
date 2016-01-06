@@ -18,7 +18,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-
     /* set */
     
     while(true) {
@@ -29,7 +28,7 @@ int main(int argc, char *argv[]) {
         commands.push_back("hello world");
         redisReply *reply = cluster->run(commands);
         if( !reply ) {
-            std::cerr << "(error) " << cluster->strerr() << ", " << cluster->err() << std::endl;
+            std::cerr << "(error) " << cluster->errmsg() << ", " << cluster->errno() << std::endl;
         } else if( reply->type==REDIS_REPLY_ERROR ) {
             std::cerr << "(error) " << reply->str << std::endl;
         } else {
