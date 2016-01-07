@@ -10,12 +10,11 @@
 #include <hiredis/hiredis.h>
 
 #ifdef DEBUG
-#define DEBUGINFO(msg) std::cout << "[DEBUG] "<< msg << std::endl;
+#define DEBUGINFO(msg) std::cout << "[DEBUG] "<< (msg) << std::endl;
 #else
 #define DEBUGINFO(msg)
 #endif
-#define DEBUGERROR(msg) std::cerr << "[ERROR] "<< msg << std::endl;
-
+#define DEBUGERROR(msg) std::cerr << "[ERROR] "<< (msg) << std::endl;
 
 namespace redis {
 namespace cluster {
@@ -31,13 +30,16 @@ static inline std::string to_upper(const std::string& in) {
     return out;
 }
 
-static inline void my_assert(bool b, const char *msg) {
+static inline void rcassert(bool b, const char *msg) {
     if(!b) {
-        DEBUGERROR(msg) std::cerr << "[ERROR] redis::cluster: "<< msg << std::endl;
+        DEBUGERROR(msg);
         abort();
     }
 }
 
+void  free_specific_data(void * sdata) {
+    delete ((redis::cluster::Cluster::ThreadDataType *)sdata);
+}
 
 /**
  * class Node
@@ -50,7 +52,8 @@ Node::Node(const std::string& host, int port) {
     conn_reuse_count_ = 0;
     conn_put_count_ = 0;
 
-    my_assert(pthread_spin_init(&lock_,PTHREAD_PROCESS_PRIVATE) == 0, "pthread_spin_init fail" );
+    int ret = pthread_spin_init(&lock_,PTHREAD_PROCESS_PRIVATE);
+    rcassert(ret == 0, "pthread_spin_init fail" );
 }
 
 Node::~Node() {
@@ -107,7 +110,7 @@ std::string Node::simple_dump() const {
     return ss.str();
 }
 
-std::string Node::statistic_dump() {
+std::string Node::stat_dump() {
     std::ostringstream ss;
     LockGuard lg(lock_);
     ss<<"Node{"<< host_ << ":" << port_ << " p_size: "<<connections_.size()
@@ -135,9 +138,10 @@ Cluster::~Cluster() {
 
 int Cluster::setup(const char *startup, bool lazy) {
 
-    my_assert(pthread_key_create(&key_, Cluster::free_specific_data) == 0, "pthread_key_create fail");
+    int ret = pthread_key_create(&key_, free_specific_data);
+    rcassert(ret == 0, "pthread_key_create fail");
 
-    int ret = pthread_spin_init(&np_lock_, PTHREAD_PROCESS_PRIVATE);
+    ret = pthread_spin_init(&np_lock_, PTHREAD_PROCESS_PRIVATE);
     if(ret != 0) {
         return -1;
     }
@@ -198,7 +202,7 @@ redisReply* Cluster::run(const std::vector<std::string> &commands) {
 
 bool Cluster::add_node(const std::string &host, int port, Node *&rpnode) {
     Node *node = new Node(host, port);
-    my_assert( node, "new Node" );
+    rcassert( node, "new Node" );
 
     LockGuard lg(np_lock_);
 
@@ -271,8 +275,7 @@ int Cluster::load_slots_cache() {
         return 0;   // only one thread is allowed to process loading
     }
 
-    printf("thread %lX load_slots_cache start ...\r\n", (unsigned long)pthread_self());
-    fflush(stdout);
+    DEBUGINFO("load_slots_cache loading start...");
 
     {
         LockGuard lg(np_lock_);
@@ -342,8 +345,7 @@ int Cluster::load_slots_cache() {
         DEBUGINFO("load_slots_cache fail from all startup node");
     }
 
-    printf("thread %lX load_slots_cache finished\r\n", (unsigned long)pthread_self());
-    fflush(stdout);
+    DEBUGINFO("load_slots_cache loading finished");
 
     pthread_spin_unlock(&load_slots_lock_);
     return count;
@@ -471,7 +473,7 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
             p = strchr(s+1,' ');    /* MOVED[S]3999[P]127.0.0.1:6381 */
             *p = '\0';
 
-            my_assert( slot == atoi(s+1), "slot in redirect response not equal to which in request" );
+            rcassert( slot == atoi(s+1), "slot in redirect response not equal to which in request" );
 
             s = strchr(p+1,':');    /* MOVED 3999[P]127.0.0.1[S]6381 */
             *s = '\0';
@@ -481,7 +483,7 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
             if(ret) {
                 DEBUGINFO("insert new node "<< node_in_pool->simple_dump()<< " from redirection" );
             } else {
-                DEBUGINFO("redirect slot "<< slot <<" to " << node_in_pool->simple_dump())
+                DEBUGINFO("redirect slot "<< slot <<" to " << node_in_pool->simple_dump());
             }
 
             slots_[slot] = node_in_pool;
@@ -508,14 +510,12 @@ Cluster::ThreadDataType &Cluster::specific_data() {
         pd =  new ThreadDataType;
         pd->errno = E_OK;
         pd->ttls  = 0;
-        my_assert(pd,"malloc fail");
-        my_assert(pthread_setspecific(key_, (void *)pd) == 0, "pthread_setspecific fail");
+        rcassert(pd, "malloc fail");
+        int ret = pthread_setspecific(key_, (void *)pd);
+        rcassert(ret == 0, "pthread_setspecific fail");
     }
     return *pd;
 };
-void  Cluster::free_specific_data(void * sdata) {
-    delete ((ThreadDataType *)sdata);
-}
 
 std::ostringstream& Cluster::set_error(ErrorE e) {
     ThreadDataType &sd = specific_data();
@@ -533,7 +533,7 @@ std::string Cluster::errmsg() {
 int Cluster::ttls() {
     return specific_data().ttls;
 }
-std::string Cluster::status_dump() {
+std::string Cluster::stat_dump() {
     std::ostringstream ss;
 
     LockGuard lg(np_lock_);
@@ -541,7 +541,7 @@ std::string Cluster::status_dump() {
     ss<<"Cluster have "<<node_pool_.size() <<" nodes: ";
 
     for(NodePoolType::iterator iter = node_pool_.begin(); iter != node_pool_.end(); iter++) {
-        ss<< "\r\n" <<(*iter)->statistic_dump();
+        ss<< "\r\n" <<(*iter)->stat_dump();
     }
     ss << "\r\n";
 

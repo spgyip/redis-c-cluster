@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
     std::vector<std::string> commands;
 
     /* set */
-    
+
     std::cerr << "set foo ..." << std::endl;
     commands.push_back("SET");
     commands.push_back("foo");
@@ -39,7 +39,7 @@ int main(int argc, char *argv[]) {
         freeReplyObject( reply );
 
     /* get */
-    
+
     std::cerr << "get foo ..." << std::endl;
     commands.clear();
     commands.push_back("GET");

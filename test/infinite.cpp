@@ -10,15 +10,15 @@
 #include <hiredis/hiredis.h>
 
 typedef struct {
-    unsigned long read;
-    unsigned long write;
-    unsigned long read_t;
-    unsigned long write_t;
-    unsigned long read_ttl;
-    unsigned long write_ttl;
-    unsigned long read_error;
-    unsigned long write_error;
-    unsigned long unmatch;
+    uint64_t read;
+    uint64_t write;
+    uint64_t read_t;
+    uint64_t write_t;
+    uint64_t read_ttl;
+    uint64_t write_ttl;
+    uint64_t read_error;
+    uint64_t write_error;
+    uint64_t unmatch;
 } stat_item_t;
 
 static const stat_item_t stat_item_initial = {0,0,0,0,0,0,0};
@@ -44,7 +44,7 @@ typedef std::map<std::string, std::string> CacheType;
 volatile int  conf_load_of_thread = 6;
 #define MAX_LOAD_OF_THREAD 10
 
-volatile int  conf_threads_num = 0;
+volatile int  conf_threads_num = 4;
 #define MAX_THREADS_NUM 20
 
 volatile bool conf_is_running = true;
@@ -128,16 +128,12 @@ int redis_get(const std::string &key, std::string& value) {
     return ret;
 }
 
-
 void* work_thread(void* para) {
     int now_us = 0;
     int now_sec = 0;
     int last_us = 0;
     volatile work_thread_data_t *pmydata = (work_thread_data_t *)para;
     volatile stat_item_t        *pstat   = &pmydata->stat;
-
-
-    //printf("thread %lX start running...\r\n", (unsigned long)(void *)pthread_self());
 
     check_point(now_us, now_sec, last_us);
     srand( now_us );
@@ -182,14 +178,15 @@ void* work_thread(void* para) {
         pstat->read_t += check_point(now_us, now_sec, last_us);
 
         /* load control */
+        while(conf_load_of_thread == 0 && pmydata->is_running) {
+            usleep(50 * 1000);
+        }
         usleep( (10 - conf_load_of_thread) * 0.5 * (pstat->read_t/pstat->read) );
 
     }
 
-    //printf("thread %lX exit...\r\n", (unsigned long)(void *)pthread_self());
     return NULL;
 }
-
 
 void* conf_thread(void* para) {
 
@@ -220,7 +217,7 @@ void* conf_thread(void* para) {
             if(conf_load_of_thread < MAX_LOAD_OF_THREAD)
                 conf_load_of_thread++;
         } else if (ch == KEY_DOWN) {
-            if(conf_load_of_thread > 1)
+            if(conf_load_of_thread > 0)
                 conf_load_of_thread--;
         }
     }
@@ -229,6 +226,8 @@ void* conf_thread(void* para) {
 
 int main(int argc, char *argv[]) {
 
+    bool interactively = true;
+
     /* init cache */
     int ret = pthread_spin_init(&c_lock, PTHREAD_PROCESS_PRIVATE);
     if(ret != 0) {
@@ -236,13 +235,21 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-
-    std::string startup = "127.0.0.1:7000,127.0.0.1:7001";
-
     /* init cluster */
-    if( argc>1 ) {
-        startup = argv[1];
+    std::string startup = "127.0.0.1:7000,127.0.0.1:7001";
+    char *arg_startup   = NULL;
+
+    if( argc > 1 ) {
+        for(int i = 1; i < argc; i++) {
+            if(strcmp(argv[i], "-n") == 0)
+                interactively = false;
+            else if(!arg_startup)
+                arg_startup = argv[i];
+        }
     }
+    if(arg_startup)
+        startup = arg_startup;
+
     std::cout << "cluster startup with " << startup << std::endl;
     cluster_ = new redis::cluster::Cluster();
 
@@ -252,10 +259,18 @@ int main(int argc, char *argv[]) {
     }
 
     /* create config thread */
-    pthread_t thconf;
-    if(pthread_create(&thconf, NULL, conf_thread, NULL) != 0) {
-        std::cerr << "create config thread fail" << std::endl;
-        return 1;
+    if(interactively) {
+        std::cout << "Hotkeys: \r\n"
+                  "'LEFT'/'RIGHT': decrease/increase number of running threads.\r\n"
+                  "'UP'/'DOWN': turn up/down the Read and Write speeds per thread.\r\n"
+                  "press ENTER to continue...";
+        getchar();
+
+        pthread_t thconf;
+        if(pthread_create(&thconf, NULL, conf_thread, NULL) != 0) {
+            std::cerr << "create config thread fail" << std::endl;
+            return 1;
+        }
     }
 
     /* control work threads and do statistics */
@@ -268,8 +283,8 @@ int main(int argc, char *argv[]) {
     int                 last_sec = 0;
     struct              timeval tv;
 
-    unsigned long total_read  = 0;
-    unsigned long total_write = 0;
+    uint64_t total_read  = 0;
+    uint64_t total_write = 0;
 
     threads_data.reserve(MAX_THREADS_NUM);
 
@@ -292,19 +307,12 @@ int main(int argc, char *argv[]) {
 
                 pdata->is_running = true;
                 pdata->stat = stat_item_initial;
+                thread_stats_last[idx] = stat_item_initial;
                 if(pthread_create(&pdata->tid, NULL, work_thread, pdata) != 0) {
                     std::cerr << "create worker thread "<<idx<<" fail" << std::endl;
                     exit(0);
                 }
             }
-#if 0
-            std::ostringstream ss;
-            for(int idx = 0; idx < workers_num_to; idx++) {
-                ss << "thread "<<idx << " is running: " << threads_data[idx].is_running << DUMP_STAT_ITEM(threads_data[idx].stat)<< "\r\n";
-            }
-            printf("%s\r\n", ss.str().c_str());
-#endif
-
         } else if (workers_num_to < workers_num_now) {
             /* end some work threads */
 
@@ -315,7 +323,6 @@ int main(int argc, char *argv[]) {
                     std::cerr << "join worker thread "<<idx<<" fail" << std::endl;
                 }
             }
-
             threads_data.resize(workers_num_to);
             thread_stats_last.resize(workers_num_to);
         }
@@ -331,29 +338,21 @@ int main(int argc, char *argv[]) {
 
             last_sec = now_sec;
 
-            unsigned long read        = 0;
-            unsigned long write       = 0;
-            unsigned long read_t      = 0;
-            unsigned long write_t     = 0;
-            unsigned long read_ttl    = 0;
-            unsigned long write_ttl   = 0;
-            unsigned long read_error  = 0;
-            unsigned long write_error = 0;
-            unsigned long unmatch     = 0;
+            uint64_t read        = 0;
+            uint64_t write       = 0;
+            uint64_t read_t      = 0;
+            uint64_t write_t     = 0;
+            uint64_t read_ttl    = 0;
+            uint64_t write_ttl   = 0;
+            uint64_t read_error  = 0;
+            uint64_t write_error = 0;
+            uint64_t unmatch     = 0;
 
             stat_item_t stat_now;
 
             for(int idx = 0; idx < workers_num_to; idx++) {
                 stat_now = threads_data[idx].stat;
 
-#if 0
-                std::ostringstream ss;
-                ss << "thread "<<idx << " is running: " << threads_data[idx].is_running << DUMP_STAT_ITEM(threads_data[idx].stat)<< "\r\n";
-                printf("%s", ss.str().c_str());
-#endif
-
-                total_read  += stat_now.read;
-                total_write += stat_now.write;
                 read        += (stat_now.read        - thread_stats_last[idx].read);
                 write       += (stat_now.write       - thread_stats_last[idx].write);
                 read_t      += (stat_now.read_t      - thread_stats_last[idx].read_t);
@@ -366,6 +365,8 @@ int main(int argc, char *argv[]) {
 
                 thread_stats_last[idx] = stat_now;
             }
+            total_read  += read;
+            total_write += write;
 
             std::cout << conf_threads_num <<" threads " << conf_load_of_thread << " loads "
                       << total_read << " R("<<read<<" read, " << read_error << " err, " <<  unmatch << " unmatch, "
@@ -374,7 +375,7 @@ int main(int argc, char *argv[]) {
 
                       << total_write << " W(" << write << " write, " << write_error << " err, "
                       << (write?(write_t/write):0)<<" usec per op, "
-                      << (write?(write_ttl/write):0)<<" ttls) " << cluster_->status_dump() << "\r\n";
+                      << (write?(write_ttl/write):0)<<" ttls) " << cluster_->stat_dump() << "\r\n";
 
             fflush(stdout);
 

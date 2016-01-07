@@ -19,7 +19,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* set */
-    
+
     while(true) {
         std::cerr << "set foo ..." << std::endl;
         std::vector<std::string> commands;

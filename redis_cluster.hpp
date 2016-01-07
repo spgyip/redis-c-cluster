@@ -52,7 +52,6 @@ public:
     bool operator==(const Node &other) const {
         return host_ == other.host_ && port_ == other.port_;
     }
-
     bool operator<(const Node &rs) const {
         if( host_<rs.host_ )
             return true;
@@ -62,7 +61,7 @@ public:
             return false;
     }
     std::string simple_dump() const;
-    std::string statistic_dump();
+    std::string stat_dump();
 
 private:
     std::string host_;
@@ -72,9 +71,9 @@ private:
     pthread_spinlock_t lock_;
 
     /* for statistic purpose begin */
-    unsigned long conn_get_count_;
-    unsigned long conn_reuse_count_;
-    unsigned long conn_put_count_;
+    uint64_t conn_get_count_;
+    uint64_t conn_reuse_count_;
+    uint64_t conn_put_count_;
     /* for statistic purpose end */
 };
 
@@ -99,6 +98,12 @@ public:
         E_OTHERS = 5
     };
 
+    typedef struct {
+        ErrorE             errno;
+        std::ostringstream errmsg;
+        int                ttls; //TTLs used by last call of run()
+    } ThreadDataType;
+
     Cluster();
     virtual ~Cluster();
 
@@ -116,24 +121,19 @@ public:
      */
     int setup(const char *startup, bool lazy);
 
-
     /**
      * Caller should call freeReplyObject to free reply.
      *
      * @return
      *  not NULL - succ
      *  NULL     - error
-     *             get the last error message with function err() & errstr()
+     *             get the last error message with function errno() & errmsg()
      */
     redisReply* run(const std::vector<std::string> &commands);
     int errno();
     std::string errmsg();
-    /**
-     * @return
-     *  number of ttls used by last run()
-     */
-    int ttls();
-    std::string status_dump();
+    int ttls();               /* return number of ttls used by last run() */
+    std::string stat_dump();
 
 public:/* for unittest */
     int test_parse_startup(const char *startup);
@@ -141,17 +141,13 @@ public:/* for unittest */
     int test_key_hash(const std::string &key);
 
 private:
-    typedef struct {
-        ErrorE             errno;
-        std::ostringstream errmsg;
-        int                ttls; //TTLs used by last call of run()
-    } ThreadDataType;
-
     bool add_node(const std::string &host, int port, Node *&rpnode);
     int parse_startup(const char *startup);
     int load_slots_cache();
     int clear_slots_cache();
     Node *get_random_node(const Node *last);
+    inline ThreadDataType &specific_data();
+    inline std::ostringstream& set_error(ErrorE e);
 
     /**
      *  Support hash tag, which means if there is a substring between {} bracket in a key, only what is inside the string is hashed.
@@ -168,10 +164,6 @@ private:
      *  NULL     - error
      */
     redisReply* redis_command_argv(const std::string& key, int argc, const char **argv, const size_t *argvlen);
-
-    inline ThreadDataType &specific_data();
-    static inline void  free_specific_data(void *sdata);
-    inline std::ostringstream& set_error(ErrorE e);
 
     NodePoolType        node_pool_;
     pthread_spinlock_t  np_lock_;
@@ -203,7 +195,6 @@ public:
 private:
     pthread_spinlock_t &lock_;
 };
-
 
 }//namespace cluster
 }//namespace redis
