@@ -1,5 +1,6 @@
 
-CXXFLAGS="-g -Wall -o2 -std=c++0x"
+CXXFLAGS="-g -Wall -o2"
+#CXXFLAGS="-g -Wall -o2 -std=c++0x"
 if [ ${IF_DEBUG} = "yes" ]
 then
     CXXFLAGS="${CXXFLAGS} -DDEBUG"
@@ -41,6 +42,9 @@ if [ $HAVE_GTEST = "yes" ]
 then
 cat << EOF >> $MAKEFILE
 
+unittest/unittest.o: unittest/unittest.cc
+        \$(CXX) \$(CXXFLAGS)  -std=c++0x -c -o \$@ \$^
+
 \$(UNITTEST): unittest/unittest.o redis_cluster.o
 	\$(CXX) $^ -o \$@ \$(LIBS) ${GTEST_LIB} -lpthread
 
@@ -50,13 +54,13 @@ fi
 cat << EOF >> $MAKEFILE
 
 \$(SIMPLE): example/simple.o redis_cluster.o
-	\$(CXX) $^ -o \$@ \$(LIBS)
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
 \$(INFINITE): test/infinite.o redis_cluster.o
-	\$(CXX) $^ -o \$@ \$(LIBS)
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread -lcurses
 
 \$(INTERACT): test/interact.o redis_cluster.o
-	\$(CXX) $^ -o \$@ \$(LIBS)
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
 \$(STATIC): redis_cluster.o
 	\$(AR) rc \$@ $^

@@ -5,8 +5,7 @@
 #include <hiredis/hiredis.h>
 #include "../redis_cluster.hpp"
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     std::string startup = "127.0.0.1:7000,127.0.0.1:7001";
     if( argc>1 ) {
         startup = argv[1];
@@ -18,19 +17,18 @@ int main(int argc, char *argv[])
         std::cerr << "cluster setup fail" << std::endl;
         return 1;
     }
- 
 
-    /* set
-     */
+    /* set */
+
     while(true) {
         std::cerr << "set foo ..." << std::endl;
         std::vector<std::string> commands;
-        commands.push_back("SET");   
-        commands.push_back("foo");   
+        commands.push_back("SET");
+        commands.push_back("foo");
         commands.push_back("hello world");
         redisReply *reply = cluster->run(commands);
         if( !reply ) {
-            std::cerr << "(error) " << cluster->strerr() << ", " << cluster->err() << std::endl;
+            std::cerr << "(error) " << cluster->errmsg() << ", " << cluster->errno() << std::endl;
         } else if( reply->type==REDIS_REPLY_ERROR ) {
             std::cerr << "(error) " << reply->str << std::endl;
         } else {
