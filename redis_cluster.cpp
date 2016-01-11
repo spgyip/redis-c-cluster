@@ -10,11 +10,15 @@
 #include <hiredis/hiredis.h>
 
 #ifdef DEBUG
-#define DEBUGINFO(msg) std::cout << "[DEBUG] "<< (msg) << std::endl;
+#define DEBUGINFO(msg) std::cout << "[DEBUG] "<< msg << std::endl;
 #else
 #define DEBUGINFO(msg)
 #endif
-#define DEBUGERROR(msg) std::cerr << "[ERROR] "<< (msg) << std::endl;
+
+#define rcassert(b) \
+    if(!(b)) {\
+        abort();\
+    }
 
 namespace redis {
 namespace cluster {
@@ -30,13 +34,6 @@ static inline std::string to_upper(const std::string& in) {
     return out;
 }
 
-static inline void rcassert(bool b, const char *msg) {
-    if(!b) {
-        DEBUGERROR(msg);
-        abort();
-    }
-}
-
 void  free_specific_data(void * sdata) {
     delete ((redis::cluster::Cluster::ThreadDataType *)sdata);
 }
@@ -44,16 +41,17 @@ void  free_specific_data(void * sdata) {
 /**
  * class Node
  */
-Node::Node(const std::string& host, int port) {
+Node::Node(const std::string& host, unsigned int port, unsigned int timeout) {
     host_ = host;
     port_ = port;
+    timeout_ = timeout;
 
     conn_get_count_ = 0;
     conn_reuse_count_ = 0;
     conn_put_count_ = 0;
 
     int ret = pthread_spin_init(&lock_,PTHREAD_PROCESS_PRIVATE);
-    rcassert(ret == 0, "pthread_spin_init fail" );
+    rcassert(ret == 0);
 }
 
 Node::~Node() {
@@ -88,13 +86,29 @@ void *Node::get_conn() {
 
     }
     if( !conn ) {
-        conn = redisConnect(host_.c_str(), port_);
-        if( conn && conn->err ) {
-            redisFree( conn );
-            conn = NULL;
+        if (timeout_ > 0) {
+            struct timeval tv;
+            tv.tv_sec = timeout_;
+            tv.tv_usec = 0;
+
+            conn = redisConnectWithTimeout(host_.c_str(), port_, tv);
+            if (conn && (conn->err != REDIS_OK)) {
+                redisFree( conn );
+                conn = NULL;
+            }
+
+            if (conn && (redisSetTimeout(conn, tv) != REDIS_OK)) {
+                redisFree( conn );
+                conn = NULL;
+            }
+        } else {
+            conn = redisConnect(host_.c_str(), port_);
+            if (conn && (conn->err != REDIS_OK)) {
+                redisFree( conn );
+                conn = NULL;
+            }
         }
     }
-
     return conn;
 }
 
@@ -120,8 +134,12 @@ std::string Node::stat_dump() {
     return ss.str();
 }
 
-Cluster::Cluster()
-    :load_slots_asap_(false) {
+/**
+ * class Cluster
+ */
+Cluster::Cluster(unsigned int timeout)
+    :load_slots_asap_(false),
+     timeout_(timeout) {
 }
 
 Cluster::~Cluster() {
@@ -139,7 +157,7 @@ Cluster::~Cluster() {
 int Cluster::setup(const char *startup, bool lazy) {
 
     int ret = pthread_key_create(&key_, free_specific_data);
-    rcassert(ret == 0, "pthread_key_create fail");
+    rcassert(ret == 0);
 
     ret = pthread_spin_init(&np_lock_, PTHREAD_PROCESS_PRIVATE);
     if(ret != 0) {
@@ -201,8 +219,8 @@ redisReply* Cluster::run(const std::vector<std::string> &commands) {
 }
 
 bool Cluster::add_node(const std::string &host, int port, Node *&rpnode) {
-    Node *node = new Node(host, port);
-    rcassert( node, "new Node" );
+    Node *node = new Node(host, port, timeout_);
+    rcassert( node );
 
     LockGuard lg(np_lock_);
 
@@ -473,7 +491,7 @@ redisReply* Cluster::redis_command_argv(const std::string& key, int argc, const 
             p = strchr(s+1,' ');    /* MOVED[S]3999[P]127.0.0.1:6381 */
             *p = '\0';
 
-            rcassert( slot == atoi(s+1), "slot in redirect response not equal to which in request" );
+            rcassert( slot == atoi(s+1) );
 
             s = strchr(p+1,':');    /* MOVED 3999[P]127.0.0.1[S]6381 */
             *s = '\0';
@@ -510,9 +528,9 @@ Cluster::ThreadDataType &Cluster::specific_data() {
         pd =  new ThreadDataType;
         pd->errno = E_OK;
         pd->ttls  = 0;
-        rcassert(pd, "malloc fail");
+        rcassert(pd);
         int ret = pthread_setspecific(key_, (void *)pd);
-        rcassert(ret == 0, "pthread_setspecific fail");
+        rcassert(ret == 0);
     }
     return *pd;
 };
