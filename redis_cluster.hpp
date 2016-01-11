@@ -33,7 +33,7 @@ namespace cluster {
 
 class Node {
 public:
-    Node(const std::string& host, int port);
+    Node(const std::string& host, unsigned int port, unsigned int timeout = 0);
     ~Node();
 
     void *get_conn();
@@ -64,8 +64,9 @@ public:
     std::string stat_dump();
 
 private:
-    std::string host_;
-    int         port_;
+    std::string  host_;
+    unsigned int port_;
+    unsigned int timeout_;
 
     std::list<void *>  connections_;
     pthread_spinlock_t lock_;
@@ -104,7 +105,7 @@ public:
         int                ttls; //TTLs used by last call of run()
     } ThreadDataType;
 
-    Cluster();
+    Cluster(unsigned int timeout = 0); // timeout: seconds waiting for when connecting to and requsting redis servers
     virtual ~Cluster();
 
     /**
@@ -172,6 +173,7 @@ private:
     pthread_spinlock_t  load_slots_lock_;
 
     bool                load_slots_asap_;
+    unsigned int        timeout_;
 
     pthread_key_t       key_;
 };

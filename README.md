@@ -27,14 +27,14 @@ if( cluster->setup("127.0.0.1:7000, 127.0.0.1:7001", true)!=0 ) {
     std::cerr << "cluster setup fail" << std::endl;
     return 1;
 }
- 
+
 std::vector<std::string> commands;
-commands.push_back("SET");   
-commands.push_back("foo");   
+commands.push_back("SET");
+commands.push_back("foo");
 commands.push_back("hello world");
 redisReply *reply = cluster->run(commands);
 if( !reply ) {
-    std::cerr << "(error)" << cluster->strerr() << ", " << cluster->err() << std::endl;
+    std::cerr << "(error)" << cluster->errmsg() << ", " << cluster->errno() << std::endl;
     return 1;
 }
 
@@ -45,7 +45,6 @@ freeReplyObject(reply);
 
 # Install
   ./configure && make && make install
-* c++ 11 is required.
 * gtest is optional for unittest.
 * hiredis is required for redis api.
 
@@ -54,5 +53,4 @@ freeReplyObject(reply);
   ./configure --debug
 
 # Future
-* Reentrance support.
-* Slave support.
+* Slave query support.
