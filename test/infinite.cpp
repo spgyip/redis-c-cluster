@@ -229,6 +229,7 @@ int main(int argc, char *argv[]) {
     bool interactively = true;
 
     /* init cache */
+
     int ret = pthread_spin_init(&c_lock, PTHREAD_PROCESS_PRIVATE);
     if(ret != 0) {
         std::cerr << "pthread_spin_init fail" << std::endl;
@@ -236,14 +237,21 @@ int main(int argc, char *argv[]) {
     }
 
     /* init cluster */
+
     std::string startup = "127.0.0.1:7000,127.0.0.1:7001";
     char *arg_startup   = NULL;
 
     if( argc > 1 ) {
         for(int i = 1; i < argc; i++) {
-            if(strcmp(argv[i], "-n") == 0)
-                interactively = false;
-            else if(!arg_startup)
+            if(strncmp(argv[i], "-n", 2) == 0) {
+                if(interactively) {
+                    interactively = false;
+                    int n = atoi(argv[i] + 2);
+                    if(n > 0) {
+                        conf_threads_num = n > MAX_THREADS_NUM? MAX_THREADS_NUM: n;
+                    }
+                }
+            } else if(!arg_startup)
                 arg_startup = argv[i];
         }
     }
@@ -251,7 +259,7 @@ int main(int argc, char *argv[]) {
         startup = arg_startup;
 
     std::cout << "cluster startup with " << startup << std::endl;
-    cluster_ = new redis::cluster::Cluster();
+    cluster_ = new redis::cluster::Cluster(1);
 
     if( cluster_->setup(startup.c_str(), true)!=0 ) {
         std::cerr << "cluster setup fail" << std::endl;
@@ -259,10 +267,12 @@ int main(int argc, char *argv[]) {
     }
 
     /* create config thread */
+
     if(interactively) {
         std::cout << "Hotkeys: \r\n"
-                  "'LEFT'/'RIGHT': decrease/increase number of running threads.\r\n"
-                  "'UP'/'DOWN': turn up/down the Read and Write speeds per thread.\r\n"
+                  "'LEFT'/'RIGHT' key to decrease/increase number of running threads.\r\n"
+                  "'UP'/'DOWN' key to turn up/down the Read and Write speeds per thread.\r\n"
+                  "'q' to quit.\r\n"
                   "press ENTER to continue...";
         getchar();
 
