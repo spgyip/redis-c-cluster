@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
     commands.push_back("hello world");
     redisReply *reply = cluster->run(commands);
     if( !reply ) {
-        std::cerr << "(error) " << cluster->errmsg() << ", " << cluster->errno() << std::endl;
+        std::cerr << "(error) " << cluster->strerr() << ", " << cluster->err() << std::endl;
     } else if( reply->type==REDIS_REPLY_ERROR ) {
         std::cerr << "(error) " << reply->str << std::endl;
     } else {
@@ -43,10 +43,10 @@ int main(int argc, char *argv[]) {
     std::cerr << "get foo ..." << std::endl;
     commands.clear();
     commands.push_back("GET");
-    commands.push_back("foo");
+    commands.push_back("eee");
     reply = cluster->run(commands);
     if( !reply ) {
-        std::cerr << "(error) " << cluster->errmsg() << ", " << cluster->errno() << std::endl;
+        std::cerr << "(error) " << cluster->strerr() << ", " << cluster->err() << std::endl;
     } else if( reply->type==REDIS_REPLY_ERROR ) {
         std::cerr << "(error) " << reply->str << std::endl;
     } else if( reply->type==REDIS_REPLY_NIL ) {
