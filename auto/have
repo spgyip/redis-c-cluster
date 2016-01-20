@@ -33,4 +33,37 @@ else
     echo "without gtest ..."
 fi
 
+if [ $GRAPHIC_INFINITE = "yes" ]
+then
+    if [ "X$RRD_LIB" = "X" ]
+    then
+        p=$(find /usr/ -name librrd_th.so|head -n 1)
+        [ "X$p" != "X" ] && RRD_LIB=$p
+        p=$(find /usr/ -name rrd.h|head -n 1)
+        [ "X$p" != "X" ] && RRD_INCLUDE=$p
+    fi
 
+    if [ "X$RRD_LIB" = "X" -o ! -f "$RRD_LIB" -o "X$RRD_INCLUDE" = "X" -o ! -f "$RRD_INCLUDE" ]
+    then
+        #if rrdtool is compiled and installed from source, its default prefix is under /opt/
+        RRD_LIB=
+        RRD_INCLUDE=
+        p=$(find /opt/ -name librrd_th.so|head -n 1)
+        [ "X$p" != "X" ] && RRD_LIB=$p
+        p=$(find /opt/ -name rrd.h|head -n 1)
+        [ "X$p" != "X" ] && RRD_INCLUDE=$p
+    fi
+
+    if [ "X$RRD_LIB" = "X" -o ! -f "$RRD_LIB" -o "X$RRD_INCLUDE" = "X" -o ! -f "$RRD_INCLUDE" ]
+    then
+        echo "(warn) rrdtool-devel not found, which is needed by graphic output of test/infinite."
+        echo "(warn) option: --graphic-infinite is not enabled."
+    else
+        HAVE_RRD=yes
+    fi
+
+    if [ $HAVE_RRD = "yes" ]
+    then
+        echo "with rrdtool $RRD_INCLUDE and $RRD_LIB ..."
+    fi
+fi

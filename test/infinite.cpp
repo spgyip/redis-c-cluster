@@ -12,7 +12,7 @@
 
 #ifdef SUPPORT_RRD
 #include "rrd.h"
-static char rrd_file[]= "./infinit.rrd";
+static char rrd_file[]= "./infinite.rrd";
 #endif
 
 typedef struct {
@@ -30,7 +30,7 @@ typedef struct {
     uint64_t write_error;// set by write thread
 } stat_item_t;
 
-static const stat_item_t stat_item_initial = {0,0,0,0,0,0,0,0,0};
+static const stat_item_t stat_item_initial = {0,0,0,0,0,0,0,0,0,0,0};
 #define DUMP_STAT_ITEM(it) " r: "<< (it).read << " w: " << (it).write << \
                            " rt: " << (it).read_t << " wt: " << (it).write_t << \
                            " re: " << (it).read_error << " we: " << (it).write_error << \
@@ -55,11 +55,12 @@ typedef struct {
 
 typedef std::map<std::string, std::string> CacheType;
 
-volatile int  conf_load_of_thread = 6;
 #define MAX_LOAD_OF_THREAD 10
+volatile int  conf_load_of_thread = MAX_LOAD_OF_THREAD;
 
-volatile int  conf_threads_num = 4;
 #define MAX_THREADS_NUM 20
+volatile int  conf_threads_num = 4;
+
 
 volatile bool conf_is_running = true;
 
@@ -68,7 +69,7 @@ CacheType          cache;
 pthread_spinlock_t c_lock; //cache lock
 
 std::string get_random_key(unsigned int &seed, unsigned int &count) {
-    int n = 10000*(rand_r(&seed)/(RAND_MAX+0.1));
+    int n = 100000*(rand_r(&seed)/(RAND_MAX+0.1));
     std::ostringstream ss;
     ss << "key_" << n;
     count++;
@@ -328,40 +329,51 @@ void* thread_conf(void* para) {
 }
 
 #ifdef SUPPORT_RRD
+
+#define __RC_RRD_PUT_ARG(argv, val, line) \
+    char arg##line[] = val;\
+    (argv).push_back(arg##line);
+#define _RC_RRD_PUT_ARG(argv, val, line) \
+    __RC_RRD_PUT_ARG(argv, val, line)
+#define RC_RRD_PUT_ARG(argv, val) \
+    _RC_RRD_PUT_ARG(argv, val, __LINE__)
+
+#define RC_RRD_PUT_ARGSQ(argv, seq, val) \
+    _RC_RRD_PUT_ARG(argv, val, seq)
+
+
+
 int create_rrd_ds() {
     char arg_start[50];
     time_t tm = time(NULL);
     std::vector<char *>rrd_argv;
 
-    char arg_cmd[]= "create";
-    rrd_argv.push_back(arg_cmd);
+    RC_RRD_PUT_ARG(rrd_argv, "create");
     rrd_argv.push_back(rrd_file);
     snprintf(arg_start, sizeof(arg_start), "-b %u", (unsigned int)tm);
     rrd_argv.push_back(arg_start);
-    char arg_step[]="-s1";
-    rrd_argv.push_back(arg_step);
-    char ds_read[] = "DS:read:GAUGE:1:U:U";
-    rrd_argv.push_back(ds_read);
-    char ds_read_err[] = "DS:read_err:GAUGE:1:U:U";
-    rrd_argv.push_back(ds_read_err);
-    char ds_read_lost[] = "DS:read_lost:GAUGE:1:U:U";
-    rrd_argv.push_back(ds_read_lost);
-    char ds_read_unmatch[] = "DS:unmatch:GAUGE:1:U:U";
-    rrd_argv.push_back(ds_read_unmatch);
-    char ds_write[] = "DS:write:GAUGE:1:U:U";
-    rrd_argv.push_back(ds_write);
-    char ds_write_new[] = "DS:write_new:GAUGE:1:U:U";
-    rrd_argv.push_back(ds_write_new);
-    char ds_write_err[] = "DS:write_err:GAUGE:1:U:U";
-    rrd_argv.push_back(ds_write_err);
-    char ds_read_t[] = "DS:read_t:GAUGE:1:0:5000";
-    rrd_argv.push_back(ds_read_t);
-    char ds_write_t[] = "DS:write_t:GAUGE:1:0:5000";
-    rrd_argv.push_back(ds_write_t);
-    char arg_rra[] = "RRA:AVERAGE:0.5:2:3600";
-    rrd_argv.push_back(arg_rra);
+    RC_RRD_PUT_ARG(rrd_argv, "-s1");
+    RC_RRD_PUT_ARG(rrd_argv, "--no-overwrite");
 
-//        setlocale(LC_ALL, "");
+    RC_RRD_PUT_ARG(rrd_argv, "DS:read:GAUGE:1:U:U");
+    RC_RRD_PUT_ARG(rrd_argv, "DS:read_err:GAUGE:1:U:U");
+    RC_RRD_PUT_ARG(rrd_argv, "DS:read_lost:GAUGE:1:U:U");
+    RC_RRD_PUT_ARG(rrd_argv, "DS:unmatch:GAUGE:1:U:U");
+    RC_RRD_PUT_ARG(rrd_argv, "DS:read_ttl:GAUGE:1:U:U");
+
+    RC_RRD_PUT_ARG(rrd_argv, "DS:write:GAUGE:1:U:U");
+    RC_RRD_PUT_ARG(rrd_argv, "DS:write_new:GAUGE:1:U:U");
+    RC_RRD_PUT_ARG(rrd_argv, "DS:write_err:GAUGE:1:U:U");
+    RC_RRD_PUT_ARG(rrd_argv, "DS:write_ttl:GAUGE:1:U:U");
+
+    RC_RRD_PUT_ARG(rrd_argv, "DS:read_t:GAUGE:1:U:U");
+    RC_RRD_PUT_ARG(rrd_argv, "DS:write_t:GAUGE:1:U:U");
+
+    RC_RRD_PUT_ARG(rrd_argv, "RRA:AVERAGE:0.5:2:3600"); // 2 hours
+    RC_RRD_PUT_ARG(rrd_argv, "RRA:AVERAGE:0.5:6:14400"); // 24 hours, 6 * 3600 * 4
+    RC_RRD_PUT_ARG(rrd_argv, "RRA:AVERAGE:0.5:12:50400"); // 7 days, 12 * 3600 * 14
+
+//  setlocale(LC_ALL, "");
     rrd_clear_error();
     int rc = rrd_create(rrd_argv.size(), rrd_argv.data());
     if(rc != 0) {
@@ -370,23 +382,23 @@ int create_rrd_ds() {
     }
 
     return 0;
+
+
 }
 
-void update_rrd_file(uint32_t now_sec, uint64_t read, uint64_t read_err, uint64_t read_lost, uint64_t unmatch,  // 1
-                     uint64_t write, uint64_t write_new, uint64_t write_err, uint64_t read_t, uint64_t write_t // 2
+void update_rrd_file(uint32_t now_sec, uint64_t read, uint64_t read_err, uint64_t read_lost, uint64_t unmatch,uint64_t read_ttl,  // 1
+                     uint64_t write, uint64_t write_new, uint64_t write_err, uint64_t write_ttl, uint64_t read_t, uint64_t write_t // 2
                     ) {
-    char rrd_arg[50];
+    char rrd_arg[200];
     std::vector<char *>rrd_argv;
 
-    char arg_cmd[]= "update";
-    rrd_argv.push_back(arg_cmd);
+    RC_RRD_PUT_ARG(rrd_argv, "update");
     rrd_argv.push_back(rrd_file);
-    snprintf(rrd_arg, sizeof(rrd_arg), "%u:%lu:%lu:%lu:%lu:%lu:" // 1
-             "%lu:%lu:%lu:%lu", // 2
-             (unsigned int)now_sec, read, read_err,read_lost,unmatch,  // 1
-             write, write_new, write_err,read_t, write_t// 2
+    snprintf(rrd_arg, sizeof(rrd_arg), "%u:" "%lu:%lu:%lu:%lu:%lu:" // 1
+             "%lu:%lu:%lu:%lu:%lu:%lu", // 2
+             (unsigned int)now_sec, read, read_err,read_lost,unmatch,read_ttl,  // 1
+             write, write_new, write_err,write_ttl,read_t, write_t// 2
             );
-
     rrd_argv.push_back(rrd_arg);
 
     rrd_clear_error();
@@ -398,23 +410,36 @@ void update_rrd_file(uint32_t now_sec, uint64_t read, uint64_t read_err, uint64_
 }
 void update_rrd_png(uint32_t now_sec) {
 
-    static char rrd_png_read[]= "./infinite_read.png";
-    static char rrd_png_write[]= "./infinite_write.png";
-    static char rrd_png_rw_t[]= "./infinite_rw_t.png";
+    static char rrd_png_read_2h[]  = "./infinite_read_2h.png";
+    static char rrd_png_read_24h[] = "./infinite_read_24h.png";
+    static char rrd_png_read_7d[]  = "./infinite_read_7d.png";
+    static char rrd_png_write_2h[] = "./infinite_write_2h.png";
+    static char rrd_png_write_24h[]= "./infinite_write_24h.png";
+    static char rrd_png_write_7d[] = "./infinite_write_7d.png";
+    static char rrd_png_rw_t_2h[]  = "./infinite_rw_t_2h.png";
+    static char rrd_png_rw_t_24h[] = "./infinite_rw_t_24h.png";
+    static char rrd_png_rw_t_7d[]  = "./infinite_rw_t_7d.png";
 
 
-#define ADD_ARG_HEADER(file_) \
-        std::vector<char *>rrd_argv;\
-        char arg_cmd[]= "graph";\
-        rrd_argv.push_back(arg_cmd);\
-        rrd_argv.push_back(file_); \
-        char arg_start[50]; \
-        snprintf(arg_start, sizeof(arg_start), "-s now-300");\
-        rrd_argv.push_back(arg_start);\
-        char arg_width[] = "-w 600";\
-        rrd_argv.push_back(arg_width);\
-        char arg_height[] = "-h 300";\
-        rrd_argv.push_back(arg_height);
+#define ADD_ARG_HEADER(file_, start, step, title) \
+    std::vector<char *>rrd_argv; \
+    RC_RRD_PUT_ARGSQ(rrd_argv,1, "graph");\
+    rrd_argv.push_back(file_); \
+    RC_RRD_PUT_ARGSQ(rrd_argv,3, "-s " start);\
+    RC_RRD_PUT_ARGSQ(rrd_argv,4, "-S " step);\
+    RC_RRD_PUT_ARGSQ(rrd_argv,20, "-w 600");\
+    RC_RRD_PUT_ARGSQ(rrd_argv,21, "-h 300");\
+    RC_RRD_PUT_ARGSQ(rrd_argv,22, "-t " title);\
+    RC_RRD_PUT_ARGSQ(rrd_argv,40, "COMMENT:LAST       MAX       AVG       MIN \\r");
+
+
+#define ADD_ARG_HEADER_STEP1(file_, title) \
+    ADD_ARG_HEADER(file_, "now-600", "2", title " - 10 minutes")
+#define ADD_ARG_HEADER_STEP2(file_, title) \
+    ADD_ARG_HEADER(file_, "now-12h", "6", title " - 12 hours")
+#define ADD_ARG_HEADER_STEP3(file_, title) \
+    ADD_ARG_HEADER(file_, "now-3d", "12", title " - 3 days")
+
 
 #define UPDATE_RRD \
     char    **calcpr;\
@@ -431,51 +456,130 @@ void update_rrd_png(uint32_t now_sec) {
             free(calcpr);\
         }\
     } else {\
-        std::cerr << rrd_get_error() << std::endl;\
+        std::cerr << __func__<< ":"<<__LINE__<<":"<<rrd_get_error() << std::endl;\
     }
 
-#define _DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail)\
-            char def##_name[50];\
-            snprintf(def##_name, sizeof(def##_name), "DEF:" #_name "=%s:" _def, rrd_file);\
-            rrd_argv.push_back(def##_name);\
-            char draw##_name[] = _draw_type ":" #_name "#" _draw_detail ":" #_name;\
-            rrd_argv.push_back(draw##_name);
-#define DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail) _DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail)
+#define __DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail, _line)\
+    char def##_name##_line[200];\
+    snprintf(def##_name##_line, sizeof(def##_name##_line), "DEF:" #_name "=%s:" _def, rrd_file);\
+    rrd_argv.push_back(def##_name##_line);\
+    RC_RRD_PUT_ARGSQ(rrd_argv,_line##1, "VDEF:" #_name "_last=" #_name ",LAST");\
+    RC_RRD_PUT_ARGSQ(rrd_argv,_line##2, "VDEF:" #_name "_max=" #_name ",MAXIMUM");\
+    RC_RRD_PUT_ARGSQ(rrd_argv,_line##3, "VDEF:" #_name "_avg=" #_name ",AVERAGE");\
+    RC_RRD_PUT_ARGSQ(rrd_argv,_line##4, "VDEF:" #_name "_min=" #_name ",MINIMUM");\
+    RC_RRD_PUT_ARGSQ(rrd_argv,_line##5, _draw_type ":" #_name "#" _draw_detail ":" #_name);\
+    RC_RRD_PUT_ARGSQ(rrd_argv,_line##6, "GPRINT:" #_name "_last:%7.1lf%s");\
+    RC_RRD_PUT_ARGSQ(rrd_argv,_line##7, "GPRINT:" #_name "_max:%7.1lf%s");\
+    RC_RRD_PUT_ARGSQ(rrd_argv,_line##8, "GPRINT:" #_name "_avg:%7.1lf%s");\
+    RC_RRD_PUT_ARGSQ(rrd_argv,_line##9, "GPRINT:" #_name "_min:%7.1lf%s\\r");
+#define _DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail, _line) __DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail,_line)
+#define DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail) _DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail,__LINE__)
 
+    static unsigned int last_rrd_png_step1 = now_sec;
+    static unsigned int last_rrd_png_step2 = now_sec;
+    static unsigned int last_rrd_png_step3 = now_sec;
 
-    {
-        /* read */
-        ADD_ARG_HEADER(rrd_png_read);
-        DEF_LINE(read,"read:AVERAGE",NULL,"LINE1","00FF00");
-        DEF_LINE(read_err,"read_err:AVERAGE",NULL,"LINE1","FF0000");
-        DEF_LINE(read_lost,"read_lost:AVERAGE",NULL,"LINE1","0000FF");
-        DEF_LINE(unmatch,"unmatch:AVERAGE",NULL,"LINE1","F0F0F0");
-        UPDATE_RRD
+    if(now_sec - last_rrd_png_step1 > 2) {
+        last_rrd_png_step1 = now_sec;
+        {
+            /* read */
+            ADD_ARG_HEADER_STEP1(rrd_png_read_2h, "READ requests per second");
+            DEF_LINE(read,"read:AVERAGE",NULL,"LINE1","00FF00");
+            DEF_LINE(read_err,"read_err:AVERAGE",NULL,"LINE1","FF0000");
+            DEF_LINE(read_lost,"read_lost:AVERAGE",NULL,"LINE1","0000FF");
+            DEF_LINE(unmatch,"unmatch:AVERAGE",NULL,"LINE1","F0F0F0");
+            UPDATE_RRD
+        }
+        {
+            /* write */
+            ADD_ARG_HEADER_STEP1(rrd_png_write_2h, "WRITE requests per second");
+            DEF_LINE(write,"write:AVERAGE", NULL,  "LINE1", "00FF00");
+            DEF_LINE(write_err,"write_err:AVERAGE", NULL,  "LINE1", "FF0000");
+            DEF_LINE(write_new,"write_new:AVERAGE", NULL,  "LINE1", "0000FF");
+            RC_RRD_PUT_ARG(rrd_argv,"COMMENT:\\r"); // draw a blank line to align size with read graph's
+            UPDATE_RRD
+        }
+        {
+            /* read_t and write_t */
+            ADD_ARG_HEADER_STEP1(rrd_png_rw_t_2h, "COST microseconds per request");
+            DEF_LINE(read_t,"read_t:AVERAGE", NULL,  "LINE1", "00FF00");
+            DEF_LINE(write_t,"write_t:AVERAGE", NULL,  "LINE1", "0000FF");
+            UPDATE_RRD
+        }
+
     }
 
-    {
-        /* write */
-        ADD_ARG_HEADER(rrd_png_write);
-        DEF_LINE(write,"write:AVERAGE", NULL,  "LINE1", "00FF00");
-        DEF_LINE(write_new,"write_new:AVERAGE", NULL,  "LINE1", "0000FF");
-        DEF_LINE(write_err,"write_err:AVERAGE", NULL,  "LINE1", "FF0000");
-        UPDATE_RRD
+    if(now_sec - last_rrd_png_step2 > 6) {
+        last_rrd_png_step2 = now_sec;
+        {
+            /* read */
+            ADD_ARG_HEADER_STEP2(rrd_png_read_24h, "READ requests per second");
+            DEF_LINE(read,"read:AVERAGE",NULL,"LINE1","00FF00");
+            DEF_LINE(read_err,"read_err:AVERAGE",NULL,"LINE1","FF0000");
+            DEF_LINE(read_lost,"read_lost:AVERAGE",NULL,"LINE1","0000FF");
+            DEF_LINE(unmatch,"unmatch:AVERAGE",NULL,"LINE1","F0F0F0");
+            UPDATE_RRD
+        }
+        {
+            /* write */
+            ADD_ARG_HEADER_STEP2(rrd_png_write_24h, "WRITE requests per second");
+            DEF_LINE(write,"write:AVERAGE", NULL,  "LINE1", "00FF00");
+            DEF_LINE(write_err,"write_err:AVERAGE", NULL,  "LINE1", "FF0000");
+            DEF_LINE(write_new,"write_new:AVERAGE", NULL,  "LINE1", "0000FF");
+            RC_RRD_PUT_ARG(rrd_argv,"COMMENT:\\r");
+            UPDATE_RRD
+        }
+        {
+            /* read_t and write_t */
+            ADD_ARG_HEADER_STEP2(rrd_png_rw_t_24h, "COST microseconds per request");
+            DEF_LINE(read_t,"read_t:AVERAGE", NULL,  "LINE1", "00FF00");
+            DEF_LINE(write_t,"write_t:AVERAGE", NULL,  "LINE1", "0000FF");
+            UPDATE_RRD
+        }
+
+
     }
 
-    {
-        /* read_t and write_t */
-        ADD_ARG_HEADER(rrd_png_rw_t);
-        DEF_LINE(read_t,"read_t:AVERAGE", NULL,  "LINE1", "00FF00");
-        DEF_LINE(write_t,"write_t:AVERAGE", NULL,  "LINE1", "0000FF");
-        UPDATE_RRD
+    if(now_sec - last_rrd_png_step3 > 12) {
+        last_rrd_png_step3 = now_sec;
+        {
+            /* read */
+            ADD_ARG_HEADER_STEP3(rrd_png_read_7d, "READ requests per second");
+            DEF_LINE(read,"read:AVERAGE",NULL,"LINE1","00FF00");
+            DEF_LINE(read_err,"read_err:AVERAGE",NULL,"LINE1","FF0000");
+            DEF_LINE(read_lost,"read_lost:AVERAGE",NULL,"LINE1","0000FF");
+            DEF_LINE(unmatch,"unmatch:AVERAGE",NULL,"LINE1","F0F0F0");
+            UPDATE_RRD
+        }
+        {
+            /* write */
+            ADD_ARG_HEADER_STEP3(rrd_png_write_7d, "WRITE requests per second");
+            DEF_LINE(write,"write:AVERAGE", NULL,  "LINE1", "00FF00");
+            DEF_LINE(write_err,"write_err:AVERAGE", NULL,  "LINE1", "FF0000");
+            DEF_LINE(write_new,"write_new:AVERAGE", NULL,  "LINE1", "0000FF");
+            RC_RRD_PUT_ARG(rrd_argv,"COMMENT:\\r");
+            UPDATE_RRD
+        }
+        {
+            /* read_t and write_t */
+            ADD_ARG_HEADER_STEP3(rrd_png_rw_t_7d, "COST microseconds per request");
+            DEF_LINE(read_t,"read_t:AVERAGE", NULL,  "LINE1", "00FF00");
+            DEF_LINE(write_t,"write_t:AVERAGE", NULL,  "LINE1", "0000FF");
+            UPDATE_RRD
+        }
     }
 
 #undef ADD_ARG_HEADER
+#undef __DEF_LINE
 #undef _DEF_LINE
 #undef DEF_LINE
 #undef UPDATE_RRD
 }
 
+#undef __RC_RRD_PUT_ARG
+#undef _RC_RRD_PUT_ARG
+#undef RC_RRD_PUT_ARG
+#undef RC_RRD_PUT_ARGSQ
 #endif
 
 int main(int argc, char *argv[]) {
@@ -512,7 +616,13 @@ int main(int argc, char *argv[]) {
     if(arg_startup)
         startup = arg_startup;
 
-    std::cout << "cluster startup with " << startup << std::endl;
+#ifdef SUPPORT_RRD
+    if(create_rrd_ds() != 0) {
+        std::cout << "Notice: reuse exited file "<<rrd_file<<"\r\n";
+    }
+#endif
+
+    std::cout << "cluster startup with " << startup << "RAND_MAX:"<< RAND_MAX<< std::endl;
     cluster_ = new redis::cluster::Cluster(1);
 
     if( cluster_->setup(startup.c_str(), true)!=0 ) {
@@ -537,13 +647,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-#ifdef SUPPORT_RRD
-
-    if(create_rrd_ds() != 0) {
-        return 1;
-    }
-#endif
-
     /* control work threads and do statistics */
 
     std::vector<work_thread_data_t> threads_data;
@@ -552,9 +655,6 @@ int main(int argc, char *argv[]) {
     int                 workers_num_to;
     work_thread_data_t *pdata;
     int                 last_sec = 0;
-#ifdef SUPPORT_RRD
-    int                 last_rrd_png = 0;
-#endif
     struct              timeval tv;
 
     uint64_t total_read  = 0;
@@ -655,19 +755,11 @@ int main(int argc, char *argv[]) {
             total_write += write;
 
 #ifdef SUPPORT_RRD
-
-            update_rrd_file(now_sec, read, read_error,read_lost, unmatch, write, write_new, write_error,   // 1
+            update_rrd_file(now_sec, read, read_error,read_lost, unmatch, read_ttl, write, write_new, write_error,write_ttl,   // 1
                             (read?(read_t/read):0), (write?(write_t/write):0) // 2
                            );
 
-            if(now_sec - last_rrd_png > 2) {
-                if(last_rrd_png != 0) {
-                    last_rrd_png = now_sec;
-                    update_rrd_png(now_sec);
-                } else {
-                    last_rrd_png = now_sec;
-                }
-            }
+            update_rrd_png(now_sec);
 #endif
 
 

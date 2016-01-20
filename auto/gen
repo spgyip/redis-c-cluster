@@ -6,6 +6,13 @@ then
     CXXFLAGS="${CXXFLAGS} -DDEBUG"
 fi
 
+if [ ${GRAPHIC_INFINITE} = "yes" -a ${HAVE_RRD} = "yes" ]
+then
+    CXXFLAGS="${CXXFLAGS} -DSUPPORT_RRD -I\$(dir ${RRD_INCLUDE})"
+else
+    RRD_LIB=
+fi
+
 cat << EOF >> $MAKEFILE
 
 CXX=g++
@@ -58,7 +65,7 @@ cat << EOF >> $MAKEFILE
 	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
 \$(INFINITE): test/infinite.o redis_cluster.o
-	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread -lcurses
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread -lcurses ${RRD_LIB}
 
 \$(SERVERRC): test/server_reconfig.o
 	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread

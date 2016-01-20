@@ -18,15 +18,15 @@
 
 
 #ifdef DEBUG
-#define DBG_TRACE_CMD(cmd) fprintf(stdout, "[CMD] %s\r\n", cmd)
+#define DBG_TRACE_CMD(cmd) fprintf(stderr, "[CMD] %s %s\r\n", cur_time(), cmd)
 #define DBG_SHELL_QUIET ""
 #else
 #define DBG_TRACE_CMD(cmd)
 #define DBG_SHELL_QUIET " 2>&1 >/dev/null"
 #endif
 
-#define DBG_ERR(format, args...) fprintf(stderr, "[WARN] " format "\r\n", ##args)
-#define DBG_INFO(format, args...) fprintf(stdout, "[INFO] " format "\r\n", ##args)
+#define DBG_ERR(format, args...) fprintf(stderr, "[WARN] %s " format "\r\n", cur_time(), ##args)
+#define DBG_INFO(format, args...) fprintf(stderr, "[INFO] %s " format "\r\n", cur_time(), ##args)
 
 #define MAX_LINE_LEN 300
 
@@ -51,6 +51,16 @@ typedef struct {
 
 GroupSet g_cluster;
 
+char *cur_time()
+{
+    static char cur_time_buf[50];
+    time_t      now = time(NULL);
+    struct tm *result = localtime(&now);
+    snprintf(cur_time_buf, sizeof(cur_time_buf), "%d-%d-%d.%d:%d:%d",
+                  result->tm_year + 1900, result->tm_mon + 1, result->tm_mday,
+                  result->tm_hour, result->tm_min, result->tm_sec);
+    return cur_time_buf;
+}
 
 /* note: the length of line output by running command 'cmd', and 'check_exist' should be no more than MAX_LINE_LEN
 */
@@ -277,14 +287,14 @@ void fix_cluster(std::string &host, std::string &port) {
         system(cmd);
 
         snprintf(cmd, sizeof(cmd), "./redis-trib.rb check %s:%s", host.c_str(), port.c_str());
-        if(!run_shell(cmd, "[WARNING]")) {
+        if(!run_shell(cmd, "[WARNING]") && !run_shell(cmd, "[ERR]")) {
             DBG_INFO("fix_cluster: check/fix successful");
             break;
         }
     }
     if(retry >= CLUSTER_FIX_ROUNDS)
     {
-        DBG_ERR("cluster in abnormal status");
+        DBG_ERR("cluster in abnormal status, please fix it manually");
     }
 #undef CLUSTER_FIX_ROUNDS
 }
@@ -412,7 +422,7 @@ int main(int argc, char **argv) {
         sleep(10);
         failover(host, port);
         sleep(10);
-        DBG_INFO("waiting %d seconds to start next operation...", interval);
+        DBG_INFO("waiting %d seconds to start next round...", interval);
         sleep(interval);
     }
 }

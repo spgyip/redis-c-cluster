@@ -127,10 +127,11 @@ std::string Node::simple_dump() const {
 std::string Node::stat_dump() {
     std::ostringstream ss;
     LockGuard lg(lock_);
-    ss<<"Node{"<< host_ << ":" << port_ << " p_size: "<<connections_.size()
-      <<" c_get: "<< conn_get_count_
-      <<" c_reuse: "<< conn_reuse_count_
-      <<" c_put: "<< conn_put_count_<<"}";
+    ss<<"Node{"<< host_ << ":" << port_ << " pool_size(free conn): "<<connections_.size()
+      <<" conn_create: "<< conn_get_count_ - conn_reuse_count_
+      <<" conn_get: "<< conn_get_count_
+      <<" conn_reuse: "<< conn_reuse_count_
+      <<" conn_put: "<< conn_put_count_<<"}";
     return ss.str();
 }
 
