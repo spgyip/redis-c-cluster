@@ -51,14 +51,13 @@ typedef struct {
 
 GroupSet g_cluster;
 
-char *cur_time()
-{
+char *cur_time() {
     static char cur_time_buf[50];
     time_t      now = time(NULL);
     struct tm *result = localtime(&now);
-    snprintf(cur_time_buf, sizeof(cur_time_buf), "%d-%d-%d.%d:%d:%d",
-                  result->tm_year + 1900, result->tm_mon + 1, result->tm_mday,
-                  result->tm_hour, result->tm_min, result->tm_sec);
+    snprintf(cur_time_buf, sizeof(cur_time_buf), "%04d-%02d-%02d.%02d:%02d:%02d",
+             result->tm_year + 1900, result->tm_mon + 1, result->tm_mday,
+             result->tm_hour, result->tm_min, result->tm_sec);
     return cur_time_buf;
 }
 
@@ -198,8 +197,7 @@ void load_servers(std::string &host, std::string &port) {
         g_cluster.push_back(grp);
     }
 
-    if(g_cluster.size() == 0)
-    {
+    if(g_cluster.size() == 0) {
         DBG_ERR("got 0 master");
         return;
     }
@@ -209,8 +207,7 @@ void load_servers(std::string &host, std::string &port) {
     size_t distance = rand_r(&rand_grop_seed) % g_cluster.size();
     GroupSet::iterator itg = g_cluster.begin();
     std::advance(itg, distance);
-    if(itg != g_cluster.begin())
-    {
+    if(itg != g_cluster.begin()) {
         Group *grp = *itg;
         g_cluster.erase(itg);
         g_cluster.insert(g_cluster.begin(), grp);
@@ -253,19 +250,14 @@ void load_servers(std::string &host, std::string &port) {
     std::ostringstream ss;
     ss << "load_servers got servers:\r\n";
     itg = g_cluster.begin();
-    for(int seq = 1; itg != g_cluster.end(); itg++, seq++)
-    {
+    for(int seq = 1; itg != g_cluster.end(); itg++, seq++) {
         const Group &grp = **itg;
         ss << "Group "<<seq << "/"<<g_cluster.size()<<" has "<< grp.slots <<" slots, with nodes:\r\n";
-        for(NodeSet::const_iterator itn = grp.nodes.begin(); itn != grp.nodes.end(); itn++)
-        {
+        for(NodeSet::const_iterator itn = grp.nodes.begin(); itn != grp.nodes.end(); itn++) {
             const Node &node = **itn;
-            if(itn == grp.nodes.begin())
-            {
-            ss << node.id << " " << node.host <<":"<< node.port << " - M\r\n"; //master
-            }
-            else
-            {
+            if(itn == grp.nodes.begin()) {
+                ss << node.id << " " << node.host <<":"<< node.port << " - M\r\n"; //master
+            } else {
                 ss <<"    "<< node.id << " " << node.host <<":"<< node.port << " - S\r\n"; //slave
             }
         }
@@ -292,8 +284,7 @@ void fix_cluster(std::string &host, std::string &port) {
             break;
         }
     }
-    if(retry >= CLUSTER_FIX_ROUNDS)
-    {
+    if(retry >= CLUSTER_FIX_ROUNDS) {
         DBG_ERR("cluster in abnormal status, please fix it manually");
     }
 #undef CLUSTER_FIX_ROUNDS

@@ -1,4 +1,5 @@
 #include "../redis_cluster.hpp"
+#include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <ncurses.h>
@@ -12,8 +13,20 @@
 
 #ifdef SUPPORT_RRD
 #include "rrd.h"
-static char rrd_file[]= "./infinite.rrd";
+static char rrd_file[] = "./infinite.rrd";
+static char rrd_notify_file[] = "./infinite.notify";
+static char rrd_conf_file[] = "./infinite.conf";
+#define MAX_CONF_LINE_LEN 100
+static char rrd_conf_target_rw_duration[] = "read_write_duration";
+
+#define MIN_RRD_DURATION 600
+#define MAX_RRD_DURATION (12*50400) // if change, should update the database rrd file
+volatile unsigned int conf_rrd_duration = MIN_RRD_DURATION; // 10 minutes
+#define RRD_DURATION_1D 86400
+#define RRD_DURATION_1H 3600
+#define RRD_DURATION_1M 60
 #endif
+
 
 typedef struct {
     uint64_t read;       // set by read thread
@@ -31,10 +44,7 @@ typedef struct {
 } stat_item_t;
 
 static const stat_item_t stat_item_initial = {0,0,0,0,0,0,0,0,0,0,0};
-#define DUMP_STAT_ITEM(it) " r: "<< (it).read << " w: " << (it).write << \
-                           " rt: " << (it).read_t << " wt: " << (it).write_t << \
-                           " re: " << (it).read_error << " we: " << (it).write_error << \
-                           " um: " << (it).unmatch << " "
+
 
 typedef struct {
     int now_sec;
@@ -68,6 +78,45 @@ redis::cluster::Cluster *cluster_ = NULL;
 CacheType          cache;
 pthread_spinlock_t c_lock; //cache lock
 
+char *cur_time() {
+    static char cur_time_buf[50];
+    time_t      now = time(NULL);
+    struct tm *result = localtime(&now);
+    snprintf(cur_time_buf, sizeof(cur_time_buf), "%04d-%02d-%02d.%02d:%02d:%02d",
+             result->tm_year + 1900, result->tm_mon + 1, result->tm_mday,
+             result->tm_hour, result->tm_min, result->tm_sec);
+    return cur_time_buf;
+}
+
+#define ERR_BUF_LEN 1000
+
+pthread_spinlock_t err_lock; // lock for log_err()
+
+void log_err(int ttls, int err, const char *strerr) {
+    static char last_err[ERR_BUF_LEN]= {'\0'};
+    static char this_err[ERR_BUF_LEN]= {'\0'};
+    static unsigned int  dup_times = 0;
+    static char *plast_err = last_err;
+    static char *pthis_err = this_err;
+
+    redis::cluster::LockGuard lg(err_lock);
+
+    snprintf(pthis_err, ERR_BUF_LEN, "[ERR] %s t %d: e %d:[%s]\r\n", cur_time(), ttls, err, strerr);
+    if(strcmp(plast_err, pthis_err) == 0) {
+        dup_times++;
+    } else {
+        if(dup_times > 0) {
+            fprintf(stderr, "[ERR] %s last error repeat %d times\r\n", cur_time(), dup_times);
+            dup_times = 0;
+        }
+        fprintf(stderr, pthis_err);
+        char *p = plast_err;
+        plast_err = pthis_err;
+        pthis_err = p;
+    }
+}
+
+
 std::string get_random_key(unsigned int &seed, unsigned int &count) {
     int n = 100000*(rand_r(&seed)/(RAND_MAX+0.1));
     std::ostringstream ss;
@@ -95,6 +144,7 @@ int check_point(int &now_us, int &now_sec, int &last_us) {
 }
 
 int redis_set(const std::string &key, const std::string& value) {
+
     int ret = 0;
     std::vector<std::string> commands;
     commands.push_back("SET");
@@ -103,13 +153,16 @@ int redis_set(const std::string &key, const std::string& value) {
     redisReply *reply = cluster_->run(commands);
     if( !reply ) {
         ret = -1;
+        log_err(cluster_->ttls(), cluster_->err(), cluster_->strerr().c_str());
     } else if( reply->type==REDIS_REPLY_STATUS && !strcmp(reply->str, "OK") ) {
         ret = 0;
     } else if( reply->type==REDIS_REPLY_ERROR ) {
         //std::cout << "redis_set error " << reply->str << std::endl;
         ret = -1;
+        log_err(cluster_->ttls(), 100, reply->str);
     } else {
         ret = -1;
+        log_err(cluster_->ttls(), 10000 + reply->type, "unknown redis server error");
     }
 
     if( reply )
@@ -126,6 +179,7 @@ int redis_get(const std::string &key, std::string& value) {
     redisReply *reply = cluster_->run(commands);
     if( !reply ) {
         ret = -1;
+        log_err(cluster_->ttls(), cluster_->err(), cluster_->strerr().c_str());
     } else if( reply->type==REDIS_REPLY_NIL ) {
         ret = 1; //not found
     } else if( reply->type==REDIS_REPLY_STRING ) {
@@ -134,8 +188,10 @@ int redis_get(const std::string &key, std::string& value) {
     } else if( reply->type==REDIS_REPLY_ERROR ) {
         //std::cout << "redis_get error " << reply->str << std::endl;
         ret = -1;
+        log_err(cluster_->ttls(), 200, reply->str);
     } else {
         ret = -1;
+        log_err(cluster_->ttls(), 20000 + reply->type, "unknown redis server error");
     }
 
     if( reply )
@@ -344,6 +400,12 @@ void* thread_conf(void* para) {
 
 
 int create_rrd_ds() {
+
+    if(access(rrd_file, F_OK) == 0) {
+        std::cout << "DB file '"<<rrd_file<<"' already exits, reuse it.\r\n";
+        return 0;
+    }
+
     char arg_start[50];
     time_t tm = time(NULL);
     std::vector<char *>rrd_argv;
@@ -353,7 +415,7 @@ int create_rrd_ds() {
     snprintf(arg_start, sizeof(arg_start), "-b %u", (unsigned int)tm);
     rrd_argv.push_back(arg_start);
     RC_RRD_PUT_ARG(rrd_argv, "-s1");
-    RC_RRD_PUT_ARG(rrd_argv, "--no-overwrite");
+    //RC_RRD_PUT_ARG(rrd_argv, "-O"); //some old version rrdtool not support -O or --no-overwrite option
 
     RC_RRD_PUT_ARG(rrd_argv, "DS:read:GAUGE:1:U:U");
     RC_RRD_PUT_ARG(rrd_argv, "DS:read_err:GAUGE:1:U:U");
@@ -371,7 +433,7 @@ int create_rrd_ds() {
 
     RC_RRD_PUT_ARG(rrd_argv, "RRA:AVERAGE:0.5:2:3600"); // 2 hours
     RC_RRD_PUT_ARG(rrd_argv, "RRA:AVERAGE:0.5:6:14400"); // 24 hours, 6 * 3600 * 4
-    RC_RRD_PUT_ARG(rrd_argv, "RRA:AVERAGE:0.5:12:50400"); // 7 days, 12 * 3600 * 14
+    RC_RRD_PUT_ARG(rrd_argv, "RRA:AVERAGE:0.5:12:50400" ); // 7 days, 12 * 3600 * 14, see MAX_RRD_DURATION
 
 //  setlocale(LC_ALL, "");
     rrd_clear_error();
@@ -382,8 +444,6 @@ int create_rrd_ds() {
     }
 
     return 0;
-
-
 }
 
 void update_rrd_file(uint32_t now_sec, uint64_t read, uint64_t read_err, uint64_t read_lost, uint64_t unmatch,uint64_t read_ttl,  // 1
@@ -408,38 +468,48 @@ void update_rrd_file(uint32_t now_sec, uint64_t read, uint64_t read_err, uint64_
     }
 
 }
-void update_rrd_png(uint32_t now_sec) {
+
+void update_rrd_png(uint32_t now_sec, bool force) {
 
     static char rrd_png_read_2h[]  = "./infinite_read_2h.png";
-    static char rrd_png_read_24h[] = "./infinite_read_24h.png";
-    static char rrd_png_read_7d[]  = "./infinite_read_7d.png";
     static char rrd_png_write_2h[] = "./infinite_write_2h.png";
-    static char rrd_png_write_24h[]= "./infinite_write_24h.png";
-    static char rrd_png_write_7d[] = "./infinite_write_7d.png";
     static char rrd_png_rw_t_2h[]  = "./infinite_rw_t_2h.png";
-    static char rrd_png_rw_t_24h[] = "./infinite_rw_t_24h.png";
-    static char rrd_png_rw_t_7d[]  = "./infinite_rw_t_7d.png";
+    static char rrd_png_rw_ttl_2h[]= "./infinite_rw_ttl_2h.png";
+
+#define RC_RRD_PUT_ARG_START_AND_TITLE(rrd_argv, duration, title, seq) \
+    char def_hdr_param_start##seq[100];\
+    snprintf(def_hdr_param_start##seq, sizeof(def_hdr_param_start##seq), "-s now-%d", duration);\
+    rrd_argv.push_back(def_hdr_param_start##seq);\
+    unsigned int left##seq,days##seq,hours##seq,minutes##seq;\
+    days##seq  = duration / RRD_DURATION_1D;\
+    left##seq  = duration % RRD_DURATION_1D;\
+    hours##seq = left##seq / RRD_DURATION_1H;\
+    left##seq = left##seq % RRD_DURATION_1H;\
+    minutes##seq = left##seq / RRD_DURATION_1M;\
+    std::ostringstream ss##seq;\
+    if(days##seq > 0) {\
+        ss##seq<<days##seq<<" days ";\
+    }\
+    if(hours##seq > 0) {\
+        ss##seq<<hours##seq<<" hours ";\
+    }\
+    if(minutes##seq > 0) {\
+        ss##seq<<minutes##seq<<" minutes";\
+    }\
+    char def_hdr_param_title##seq[200];\
+    snprintf(def_hdr_param_title##seq, sizeof(def_hdr_param_title##seq), "-t %s - %s", title,\
+             ss##seq.str().length()>0?ss##seq.str().c_str():"unknown");\
+    rrd_argv.push_back(def_hdr_param_title##seq);
 
 
-#define ADD_ARG_HEADER(file_, start, step, title) \
+#define ADD_ARG_HEADER(file, duration, title) \
     std::vector<char *>rrd_argv; \
     RC_RRD_PUT_ARGSQ(rrd_argv,1, "graph");\
-    rrd_argv.push_back(file_); \
-    RC_RRD_PUT_ARGSQ(rrd_argv,3, "-s " start);\
-    RC_RRD_PUT_ARGSQ(rrd_argv,4, "-S " step);\
+    rrd_argv.push_back(file); \
     RC_RRD_PUT_ARGSQ(rrd_argv,20, "-w 600");\
     RC_RRD_PUT_ARGSQ(rrd_argv,21, "-h 300");\
-    RC_RRD_PUT_ARGSQ(rrd_argv,22, "-t " title);\
+    RC_RRD_PUT_ARG_START_AND_TITLE(rrd_argv, duration, title, 31);\
     RC_RRD_PUT_ARGSQ(rrd_argv,40, "COMMENT:LAST       MAX       AVG       MIN \\r");
-
-
-#define ADD_ARG_HEADER_STEP1(file_, title) \
-    ADD_ARG_HEADER(file_, "now-600", "2", title " - 10 minutes")
-#define ADD_ARG_HEADER_STEP2(file_, title) \
-    ADD_ARG_HEADER(file_, "now-12h", "6", title " - 12 hours")
-#define ADD_ARG_HEADER_STEP3(file_, title) \
-    ADD_ARG_HEADER(file_, "now-3d", "12", title " - 3 days")
-
 
 #define UPDATE_RRD \
     char    **calcpr;\
@@ -475,15 +545,13 @@ void update_rrd_png(uint32_t now_sec) {
 #define _DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail, _line) __DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail,_line)
 #define DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail) _DEF_LINE(_name,_def,_vdef,_draw_type, _draw_detail,__LINE__)
 
-    static unsigned int last_rrd_png_step1 = now_sec;
-    static unsigned int last_rrd_png_step2 = now_sec;
-    static unsigned int last_rrd_png_step3 = now_sec;
+    static unsigned int last_update_sec = now_sec;
 
-    if(now_sec - last_rrd_png_step1 > 2) {
-        last_rrd_png_step1 = now_sec;
+    if(force || (now_sec - last_update_sec > 2)) {
+        last_update_sec = now_sec;
         {
             /* read */
-            ADD_ARG_HEADER_STEP1(rrd_png_read_2h, "READ requests per second");
+            ADD_ARG_HEADER(rrd_png_read_2h, conf_rrd_duration, "READ requests per second");
             DEF_LINE(read,"read:AVERAGE",NULL,"LINE1","00FF00");
             DEF_LINE(read_err,"read_err:AVERAGE",NULL,"LINE1","FF0000");
             DEF_LINE(read_lost,"read_lost:AVERAGE",NULL,"LINE1","0000FF");
@@ -492,7 +560,7 @@ void update_rrd_png(uint32_t now_sec) {
         }
         {
             /* write */
-            ADD_ARG_HEADER_STEP1(rrd_png_write_2h, "WRITE requests per second");
+            ADD_ARG_HEADER(rrd_png_write_2h, conf_rrd_duration, "WRITE requests per second");
             DEF_LINE(write,"write:AVERAGE", NULL,  "LINE1", "00FF00");
             DEF_LINE(write_err,"write_err:AVERAGE", NULL,  "LINE1", "FF0000");
             DEF_LINE(write_new,"write_new:AVERAGE", NULL,  "LINE1", "0000FF");
@@ -501,72 +569,19 @@ void update_rrd_png(uint32_t now_sec) {
         }
         {
             /* read_t and write_t */
-            ADD_ARG_HEADER_STEP1(rrd_png_rw_t_2h, "COST microseconds per request");
+            ADD_ARG_HEADER(rrd_png_rw_t_2h, conf_rrd_duration, "COST microseconds per request");
             DEF_LINE(read_t,"read_t:AVERAGE", NULL,  "LINE1", "00FF00");
             DEF_LINE(write_t,"write_t:AVERAGE", NULL,  "LINE1", "0000FF");
             UPDATE_RRD
         }
-
-    }
-
-    if(now_sec - last_rrd_png_step2 > 6) {
-        last_rrd_png_step2 = now_sec;
         {
-            /* read */
-            ADD_ARG_HEADER_STEP2(rrd_png_read_24h, "READ requests per second");
-            DEF_LINE(read,"read:AVERAGE",NULL,"LINE1","00FF00");
-            DEF_LINE(read_err,"read_err:AVERAGE",NULL,"LINE1","FF0000");
-            DEF_LINE(read_lost,"read_lost:AVERAGE",NULL,"LINE1","0000FF");
-            DEF_LINE(unmatch,"unmatch:AVERAGE",NULL,"LINE1","F0F0F0");
-            UPDATE_RRD
-        }
-        {
-            /* write */
-            ADD_ARG_HEADER_STEP2(rrd_png_write_24h, "WRITE requests per second");
-            DEF_LINE(write,"write:AVERAGE", NULL,  "LINE1", "00FF00");
-            DEF_LINE(write_err,"write_err:AVERAGE", NULL,  "LINE1", "FF0000");
-            DEF_LINE(write_new,"write_new:AVERAGE", NULL,  "LINE1", "0000FF");
-            RC_RRD_PUT_ARG(rrd_argv,"COMMENT:\\r");
-            UPDATE_RRD
-        }
-        {
-            /* read_t and write_t */
-            ADD_ARG_HEADER_STEP2(rrd_png_rw_t_24h, "COST microseconds per request");
-            DEF_LINE(read_t,"read_t:AVERAGE", NULL,  "LINE1", "00FF00");
-            DEF_LINE(write_t,"write_t:AVERAGE", NULL,  "LINE1", "0000FF");
+            /* read_ttls and write_ttls */
+            ADD_ARG_HEADER(rrd_png_rw_ttl_2h, conf_rrd_duration, "COST ttls per request");
+            DEF_LINE(read_ttl,"read_ttl:AVERAGE", NULL,  "LINE1", "00FF00");
+            DEF_LINE(write_ttl,"write_ttl:AVERAGE", NULL,  "LINE1", "0000FF");
             UPDATE_RRD
         }
 
-
-    }
-
-    if(now_sec - last_rrd_png_step3 > 12) {
-        last_rrd_png_step3 = now_sec;
-        {
-            /* read */
-            ADD_ARG_HEADER_STEP3(rrd_png_read_7d, "READ requests per second");
-            DEF_LINE(read,"read:AVERAGE",NULL,"LINE1","00FF00");
-            DEF_LINE(read_err,"read_err:AVERAGE",NULL,"LINE1","FF0000");
-            DEF_LINE(read_lost,"read_lost:AVERAGE",NULL,"LINE1","0000FF");
-            DEF_LINE(unmatch,"unmatch:AVERAGE",NULL,"LINE1","F0F0F0");
-            UPDATE_RRD
-        }
-        {
-            /* write */
-            ADD_ARG_HEADER_STEP3(rrd_png_write_7d, "WRITE requests per second");
-            DEF_LINE(write,"write:AVERAGE", NULL,  "LINE1", "00FF00");
-            DEF_LINE(write_err,"write_err:AVERAGE", NULL,  "LINE1", "FF0000");
-            DEF_LINE(write_new,"write_new:AVERAGE", NULL,  "LINE1", "0000FF");
-            RC_RRD_PUT_ARG(rrd_argv,"COMMENT:\\r");
-            UPDATE_RRD
-        }
-        {
-            /* read_t and write_t */
-            ADD_ARG_HEADER_STEP3(rrd_png_rw_t_7d, "COST microseconds per request");
-            DEF_LINE(read_t,"read_t:AVERAGE", NULL,  "LINE1", "00FF00");
-            DEF_LINE(write_t,"write_t:AVERAGE", NULL,  "LINE1", "0000FF");
-            UPDATE_RRD
-        }
     }
 
 #undef ADD_ARG_HEADER
@@ -574,6 +589,52 @@ void update_rrd_png(uint32_t now_sec) {
 #undef _DEF_LINE
 #undef DEF_LINE
 #undef UPDATE_RRD
+}
+
+bool update_duration_conf(unsigned int usec, bool force) {
+    static unsigned int last_usec = usec;
+
+    if(!force) {
+        if(usec - last_usec < 400000) {
+            return false;
+        }
+        last_usec = usec;
+        if(access(rrd_notify_file, F_OK) != 0) {
+            return false;
+        }
+        if(remove(rrd_notify_file) != 0) {
+            log_err(0, errno, strerror(errno));
+        }
+    }
+
+    FILE *fp = fopen(rrd_conf_file, "r");
+    if(!fp) {
+        log_err(0, errno, strerror(errno));
+        return false;;
+    }
+
+    char buf[MAX_CONF_LINE_LEN];
+    char *pk,*pv, *saveptr;
+    unsigned int duration = conf_rrd_duration;
+    while(fgets(buf,sizeof(buf),fp)) {
+        pk = strtok_r(buf, " \t", &saveptr);
+        if(strcmp(pk, rrd_conf_target_rw_duration) == 0) {
+            pv = strtok_r(NULL, " \t\r\n", &saveptr);
+            if(pv) {
+                duration = atoi(pv);
+            }
+            if(duration < MIN_RRD_DURATION) {
+                duration = MIN_RRD_DURATION;
+            }
+            if(duration > MAX_RRD_DURATION) {
+                duration = MAX_RRD_DURATION;
+            }
+            conf_rrd_duration = duration;
+            //printf("update configuration %s to %d\r\n", rrd_conf_target_rw_duration, conf_rrd_duration);
+        }
+    }
+    fclose(fp);
+    return true;
 }
 
 #undef __RC_RRD_PUT_ARG
@@ -585,14 +646,31 @@ void update_rrd_png(uint32_t now_sec) {
 int main(int argc, char *argv[]) {
 
     bool interactively = true;
+    struct  timeval tv;
 
-    /* init cache */
-
-    int ret = pthread_spin_init(&c_lock, PTHREAD_PROCESS_PRIVATE);
+    int ret = pthread_spin_init(&err_lock, PTHREAD_PROCESS_PRIVATE);
     if(ret != 0) {
         std::cerr << "pthread_spin_init fail" << std::endl;
         return 1;
     }
+
+    ret = pthread_spin_init(&c_lock, PTHREAD_PROCESS_PRIVATE);
+    if(ret != 0) {
+        std::cerr << "pthread_spin_init fail" << std::endl;
+        return 1;
+    }
+
+#ifdef SUPPORT_RRD
+    if(create_rrd_ds() != 0) {
+        return 1;
+    }
+    unsigned int last_rrd_duration = conf_rrd_duration;
+
+    gettimeofday( &tv, NULL );
+    if( !update_duration_conf(tv.tv_usec, true)) {
+        return 1;
+    }
+#endif
 
     /* init cluster */
 
@@ -616,13 +694,7 @@ int main(int argc, char *argv[]) {
     if(arg_startup)
         startup = arg_startup;
 
-#ifdef SUPPORT_RRD
-    if(create_rrd_ds() != 0) {
-        std::cout << "Notice: reuse exited file "<<rrd_file<<"\r\n";
-    }
-#endif
-
-    std::cout << "cluster startup with " << startup << "RAND_MAX:"<< RAND_MAX<< std::endl;
+    std::cout << "cluster startup with " << startup << " RAND_MAX:"<< RAND_MAX<< std::endl;
     cluster_ = new redis::cluster::Cluster(1);
 
     if( cluster_->setup(startup.c_str(), true)!=0 ) {
@@ -655,7 +727,7 @@ int main(int argc, char *argv[]) {
     int                 workers_num_to;
     work_thread_data_t *pdata;
     int                 last_sec = 0;
-    struct              timeval tv;
+
 
     uint64_t total_read  = 0;
     uint64_t total_write = 0;
@@ -716,6 +788,11 @@ int main(int argc, char *argv[]) {
 
         gettimeofday( &tv, NULL );
         int now_sec = tv.tv_sec;
+
+#ifdef SUPPORT_RRD
+        (void)update_duration_conf(tv.tv_usec, false);
+#endif
+
         if( last_sec != now_sec ) {
 
             last_sec = now_sec;
@@ -755,24 +832,31 @@ int main(int argc, char *argv[]) {
             total_write += write;
 
 #ifdef SUPPORT_RRD
-            update_rrd_file(now_sec, read, read_error,read_lost, unmatch, read_ttl, write, write_new, write_error,write_ttl,   // 1
+            update_rrd_file(now_sec, read, read_error,read_lost, unmatch, (read?(read_ttl/read):0), write, write_new, write_error,(write?(write_ttl/write):0),   // 1
                             (read?(read_t/read):0), (write?(write_t/write):0) // 2
                            );
 
-            update_rrd_png(now_sec);
+            if(last_rrd_duration != conf_rrd_duration) {
+                last_rrd_duration = conf_rrd_duration;
+                update_rrd_png(now_sec, true);
+            } else {
+                update_rrd_png(now_sec, false);
+            }
 #endif
 
+            static unsigned int ctrl_cnt = 0;
+            if(((++ctrl_cnt) & 1) == 0) {
+                std::cout << cur_time() <<" "<<conf_threads_num <<" threads " << conf_load_of_thread << " loads "
+                          << total_read << " R("<<read<<" read, " << read_error << " err, "<< read_lost << " lost, " <<  unmatch << " unmatch, "
+                          << (read?(read_t/read):0)<<" usec per op, "
+                          << (read?(read_ttl/read):0)<<" ttls) | "
 
-            std::cout << conf_threads_num <<" threads " << conf_load_of_thread << " loads "
-                      << total_read << " R("<<read<<" read, " << read_error << " err, "<< read_lost << " lost, " <<  unmatch << " unmatch, "
-                      << (read?(read_t/read):0)<<" usec per op, "
-                      << (read?(read_ttl/read):0)<<" ttls) | "
+                          << total_write << " W(" << write << " write, " << write_error << " err, "<< write_new << " new, "
+                          << (write?(write_t/write):0)<<" usec per op, "
+                          << (write?(write_ttl/write):0)<<" ttls) " << cluster_->stat_dump() << "\r\n";
 
-                      << total_write << " W(" << write << " write, " << write_error << " err, "<< write_new << " new, "
-                      << (write?(write_t/write):0)<<" usec per op, "
-                      << (write?(write_ttl/write):0)<<" ttls) " << cluster_->stat_dump() << "\r\n";
-
-            fflush(stdout);
+                fflush(stdout);
+            }
 
         }
         usleep( 1000*10 );
@@ -781,4 +865,5 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+#define ERR_BUF_LEN 1000
 
