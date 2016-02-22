@@ -3,7 +3,7 @@
 #include <iostream>
 #include <string.h>
 #include <hiredis/hiredis.h>
-#include "../redis_cluster.hpp"
+#include "../redis_cluster.h"
 
 int main(int argc, char *argv[]) {
     std::string startup = "127.0.0.1:7000,127.0.0.1:7001";

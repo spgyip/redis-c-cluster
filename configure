@@ -13,8 +13,6 @@ GTEST_LIB=""
 
 HAVE_GTEST=no
 IF_DEBUG=no
-GRAPHIC_INFINITE=no
-HAVE_RRD=no
 
 for option
 do
@@ -28,7 +26,6 @@ do
         --prefix=*)         PREFIX=$value                           ;;
         --with-hiredis=*)   HIREDIS_LIB=$value                      ;;
         --with-gtest=*)     GTEST_LIB=$value                        ;;
-        --graphic-infinite) GRAPHIC_INFINITE=yes                    ;;
         --debug)        IF_DEBUG=yes                ;;
         *)
             echo "error: invalid option $option"
@@ -45,7 +42,6 @@ then
     echo "--prefix=DIR               set installation prefix"
     echo "--with-hredis=DIR          set path to hiredis library"
     echo "--with-gtest=DIR           set path to gtest library"
-    echo "--graphic-infinite         enable graphic ouput of test/infinite, to enable this, rrdtool must be installed in /usr/ or /opt/"
     echo "--debug                    build debug version"
     echo ""
     exit 0

@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 #include <gtest/gtest.h>
-#include "../redis_cluster.hpp"
+#include "../redis_cluster.h"
 
 
 class ClusterTestObj : public ::testing::Test {

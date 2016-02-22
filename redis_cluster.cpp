@@ -1,4 +1,4 @@
-#include "redis_cluster.hpp"
+#include "redis_cluster.h"
 #include "deps/crc16.c"
 #include <time.h>
 #include <string.h>

@@ -6,13 +6,6 @@ then
     CXXFLAGS="${CXXFLAGS} -DDEBUG"
 fi
 
-if [ ${GRAPHIC_INFINITE} = "yes" -a ${HAVE_RRD} = "yes" ]
-then
-    CXXFLAGS="${CXXFLAGS} -DSUPPORT_RRD -I\$(dir ${RRD_INCLUDE})"
-else
-    RRD_LIB=
-fi
-
 cat << EOF >> $MAKEFILE
 
 CXX=g++
@@ -26,7 +19,7 @@ LIBS=\$(LIB_HIREDIS)
 SIMPLE=example/simple
 INFINITE=test/infinite
 INTERACT=test/interact
-SERVERRC=test/server_reconfig
+SERVERRC=tools/server_reconfig
 UNITTEST=unittest/unittest
 STATIC=libredis_cluster.a
 
@@ -65,9 +58,9 @@ cat << EOF >> $MAKEFILE
 	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
 \$(INFINITE): test/infinite.o redis_cluster.o
-	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread -lcurses ${RRD_LIB}
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread -lcurses
 
-\$(SERVERRC): test/server_reconfig.o
+\$(SERVERRC): tools/server_reconfig.o
 	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
 \$(INTERACT): test/interact.o redis_cluster.o
@@ -77,12 +70,12 @@ cat << EOF >> $MAKEFILE
 	\$(AR) rc \$@ $^
 
 clean:
-	rm -rfv *.o unittest/*.o example/*.o test/*.o \$(TARGETS)
+	rm -rfv *.o unittest/*.o example/*.o test/*.o tools/*.o \$(TARGETS)
 
 install:
 	mkdir -p ${PREFIX}/include
 	mkdir -p ${PREFIX}/lib
-	cp -a redis_cluster.hpp ${PREFIX}/include/
+	cp -a redis_cluster.h ${PREFIX}/include/
 	cp -a \$(STATIC) ${PREFIX}/lib/
 
 EOF
