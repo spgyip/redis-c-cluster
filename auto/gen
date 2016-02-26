@@ -19,12 +19,13 @@ LIBS=\$(LIB_HIREDIS)
 SIMPLE=example/simple
 INFINITE=test/infinite
 INTERACT=test/interact
+SERVERRC=tools/server_reconfig
 UNITTEST=unittest/unittest
 STATIC=libredis_cluster.a
 
 EOF
 
-echo -ne "TARGETS=\$(STATIC) \$(SIMPLE) \$(INFINITE) \$(INTERACT) " >> $MAKEFILE
+echo -ne "TARGETS=\$(STATIC) \$(SIMPLE) \$(INFINITE) \$(INTERACT) \$(SERVERRC) " >> $MAKEFILE
 if [ $HAVE_GTEST = "yes" ]
 then
 	echo -ne "\$(UNITTEST)\n" >> $MAKEFILE
@@ -32,7 +33,7 @@ fi
 
 cat << EOF >> $MAKEFILE
 
-all: \$(TARGETS) 
+all: \$(TARGETS)
 
 lib: \$(STATIC)
 
@@ -43,7 +44,7 @@ then
 cat << EOF >> $MAKEFILE
 
 unittest/unittest.o: unittest/unittest.cc
-        \$(CXX) \$(CXXFLAGS)  -std=c++0x -c -o \$@ \$^
+	\$(CXX) \$(CXXFLAGS)  -std=c++0x -c -o \$@ \$^
 
 \$(UNITTEST): unittest/unittest.o redis_cluster.o
 	\$(CXX) $^ -o \$@ \$(LIBS) ${GTEST_LIB} -lpthread
@@ -59,6 +60,9 @@ cat << EOF >> $MAKEFILE
 \$(INFINITE): test/infinite.o redis_cluster.o
 	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread -lcurses
 
+\$(SERVERRC): tools/server_reconfig.o
+	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
+
 \$(INTERACT): test/interact.o redis_cluster.o
 	\$(CXX) $^ -o \$@ \$(LIBS) -lpthread
 
@@ -66,12 +70,12 @@ cat << EOF >> $MAKEFILE
 	\$(AR) rc \$@ $^
 
 clean:
-	rm -rfv *.o unittest/*.o example/*.o test/*.o \$(TARGETS)
+	rm -rfv *.o unittest/*.o example/*.o test/*.o tools/*.o \$(TARGETS)
 
 install:
 	mkdir -p ${PREFIX}/include
 	mkdir -p ${PREFIX}/lib
-	cp -a redis_cluster.hpp ${PREFIX}/include/
+	cp -a redis_cluster.h ${PREFIX}/include/
 	cp -a \$(STATIC) ${PREFIX}/lib/
 
 EOF

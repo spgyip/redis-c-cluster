@@ -100,8 +100,8 @@ public:
     };
 
     typedef struct {
-        ErrorE             errno;
-        std::ostringstream errmsg;
+        ErrorE             err;
+        std::ostringstream strerr;
         int                ttls; //TTLs used by last call of run()
     } ThreadDataType;
 
@@ -128,11 +128,11 @@ public:
      * @return
      *  not NULL - succ
      *  NULL     - error
-     *             get the last error message with function errno() & errmsg()
+     *             get the last error message with function err() & strerr()
      */
     redisReply* run(const std::vector<std::string> &commands);
-    int errno();
-    std::string errmsg();
+    int err();
+    std::string strerr();
     int ttls();               /* return number of ttls used by last run() */
     std::string stat_dump();
 

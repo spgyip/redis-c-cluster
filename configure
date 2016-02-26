@@ -26,8 +26,8 @@ do
         --prefix=*)         PREFIX=$value                           ;;
         --with-hiredis=*)   HIREDIS_LIB=$value                      ;;
         --with-gtest=*)     GTEST_LIB=$value                        ;;
- 	    --debug)	         IF_DEBUG=yes			                 ;;
-        *) 
+        --debug)        IF_DEBUG=yes                ;;
+        *)
             echo "error: invalid option $option"
             exit 1
         ;;

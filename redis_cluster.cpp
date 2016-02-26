@@ -1,4 +1,4 @@
-#include "redis_cluster.hpp"
+#include "redis_cluster.h"
 #include "deps/crc16.c"
 #include <time.h>
 #include <string.h>
@@ -127,10 +127,11 @@ std::string Node::simple_dump() const {
 std::string Node::stat_dump() {
     std::ostringstream ss;
     LockGuard lg(lock_);
-    ss<<"Node{"<< host_ << ":" << port_ << " p_size: "<<connections_.size()
-      <<" c_get: "<< conn_get_count_
-      <<" c_reuse: "<< conn_reuse_count_
-      <<" c_put: "<< conn_put_count_<<"}";
+    ss<<"Node{"<< host_ << ":" << port_ << " pool_size(free conn): "<<connections_.size()
+      <<" conn_create: "<< conn_get_count_ - conn_reuse_count_
+      <<" conn_get: "<< conn_get_count_
+      <<" conn_reuse: "<< conn_reuse_count_
+      <<" conn_put: "<< conn_put_count_<<"}";
     return ss.str();
 }
 
@@ -526,7 +527,7 @@ Cluster::ThreadDataType &Cluster::specific_data() {
     ThreadDataType *pd = (ThreadDataType *)pthread_getspecific(key_);
     if(!pd) {
         pd =  new ThreadDataType;
-        pd->errno = E_OK;
+        pd->err = E_OK;
         pd->ttls  = 0;
         rcassert(pd);
         int ret = pthread_setspecific(key_, (void *)pd);
@@ -537,16 +538,16 @@ Cluster::ThreadDataType &Cluster::specific_data() {
 
 std::ostringstream& Cluster::set_error(ErrorE e) {
     ThreadDataType &sd = specific_data();
-    sd.errno = e;
-    sd.errmsg.str("");
-    return sd.errmsg;
+    sd.err = e;
+    sd.strerr.str("");
+    return sd.strerr;
 }
 
-int Cluster::errno() {
-    return specific_data().errno;
+int Cluster::err() {
+    return specific_data().err;
 }
-std::string Cluster::errmsg() {
-    return specific_data().errmsg.str();
+std::string Cluster::strerr() {
+    return specific_data().strerr.str();
 }
 int Cluster::ttls() {
     return specific_data().ttls;

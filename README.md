@@ -34,7 +34,7 @@ commands.push_back("foo");
 commands.push_back("hello world");
 redisReply *reply = cluster->run(commands);
 if( !reply ) {
-    std::cerr << "(error)" << cluster->errmsg() << ", " << cluster->errno() << std::endl;
+    std::cerr << "(error)" << cluster->strerr() << ", " << cluster->err() << std::endl;
     return 1;
 }
 

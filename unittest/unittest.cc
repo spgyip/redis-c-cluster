@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 #include <gtest/gtest.h>
-#include "../redis_cluster.hpp"
+#include "../redis_cluster.h"
 
 
 class ClusterTestObj : public ::testing::Test {
@@ -30,8 +30,8 @@ TEST_F(ClusterTestObj, errinfo) {
     ASSERT_TRUE(cluster_->setup("",true) == 0);
     redisReply* ret = cluster_->run(cmd);
     ASSERT_FALSE(ret);
-    ASSERT_EQ(cluster_->errno(), redis::cluster::Cluster::E_COMMANDS);
-    ASSERT_TRUE(cluster_->errmsg().find("not supported") != std::string::npos);
+    ASSERT_EQ(cluster_->err(), redis::cluster::Cluster::E_COMMANDS);
+    ASSERT_TRUE(cluster_->strerr().find("not supported") != std::string::npos);
 }
 
 TEST_F(ClusterTestObj, test_parse_startup) {
