@@ -88,15 +88,30 @@ TEST(CaseHashing, test_hash_key) {
     std::string key3 = "abc{supergui}";
     std::string key4 = "{supergui}123";
 
+    std::string key51 = "{supergui123";
+    std::string key52 = "{{supergui123}ac";
+    std::string key53 = "{{supergui123}}ac";
+
+    std::string key6 = "{}supergui123";
 
     int hash1 = cluster->test_key_hash(key1);
     int hash2 = cluster->test_key_hash(key2);
     int hash3 = cluster->test_key_hash(key3);
     int hash4 = cluster->test_key_hash(key4);
 
+    int hash51 = cluster->test_key_hash(key51);
+    int hash52 = cluster->test_key_hash(key52);
+    int hash53 = cluster->test_key_hash(key53);
+
+    int hash6 = cluster->test_key_hash(key6);
+
     ASSERT_EQ( hash1, hash2 );
     ASSERT_EQ( hash1, hash3 );
     ASSERT_EQ( hash1, hash4 );
+    ASSERT_EQ( hash51, hash52 );
+    ASSERT_EQ( hash51, hash53 );
+
+    ASSERT_NE( hash6, 0 );
 
     delete cluster;
 }
