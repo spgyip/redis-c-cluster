@@ -411,8 +411,8 @@ uint16_t Cluster::get_key_hash(const std::string &key) {
     pos1 = key.find("{");
     if( pos1!=std::string::npos ) {
         pos2 = key.find("}", pos1+1);
-        if( pos2!=std::string::npos ) {
-            hashing_key = key.substr(pos1+1, pos2-pos1-1);
+        if((pos2!=std::string::npos) && (pos2 != pos1+1)) {
+            hashing_key = key.substr(pos1+1, (pos2-pos1)-1);
         }
     }
     return crc16(hashing_key.c_str(), hashing_key.length());
